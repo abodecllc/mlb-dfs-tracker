@@ -480,26 +480,49 @@ function renderDashboard() {
       labels: { 'DK':'DK', 'FD':'FD' },
     },
     {
-      title: 'By contest type',
+      title: 'GPP vs Cash ROI',
+      key: '_contestClass', // computed below
+      order: ['GPP','Cash'],
+      labels: { 'GPP': 'GPP (all)', 'Cash': 'Cash (all)' },
+    },
+    {
+      title: 'Cash — by format',
       key: 'ctype',
-      order: null, // dynamic
+      order: ['Cash 50/50','Cash Double-Up','H2H','3-Max','5-Max','20-Max'],
+      labels: {},
+    },
+    {
+      title: 'GPP — by format',
+      key: 'ctype',
+      order: ['GPP'],
       labels: {},
     },
   ];
+
+  // Inject computed _contestClass field for GPP vs Cash card
+  slates.forEach(s => {
+    s._contestClass = s.ctype
+      ? (s.ctype === 'GPP' ? 'GPP' : s.ctype.startsWith('Cash') || ['H2H','3-Max','5-Max','20-Max'].includes(s.ctype) ? 'Cash' : 'GPP')
+      : null;
+  });
+
+  function isCashContest(s) {
+    return s.ctype && (s.ctype.startsWith('Cash') || ['H2H','3-Max','5-Max','20-Max'].includes(s.ctype));
+  }
 
   function bucketsFor(bk) {
     const map = {};
     slates.forEach(s => {
       const val = s[bk.key] || 'Unknown';
+      if (val === 'Unknown' && bk.key === '_contestClass') return; // skip unclassified
       if (!map[val]) map[val] = { n: 0, invested: 0, winnings: 0, cashes: 0, cashTotal: 0 };
       map[val].n++;
       map[val].invested += s.invested || 0;
       if (s.hasResults) {
         map[val].winnings += s.winnings || 0;
-        if (s.ctype && s.ctype.startsWith('Cash')) {
-          map[val].cashTotal++;
-          if (s.cashed === 'Y') map[val].cashes++;
-        }
+        // Track win rate for both cash contests and GPP (any lineup that cashed)
+        map[val].cashTotal++;
+        if (s.cashed === 'Y') map[val].cashes++;
       }
     });
     return map;
