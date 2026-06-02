@@ -64,39 +64,80 @@
         </div>
 
         <div class="divider">Lineup construction</div>
-        <div class="form-grid">
-          <div class="field"><label>SP used</label><input type="text" id="f-sp" placeholder="e.g. G. Cole"></div>
-          <div class="field"><label>SP proj own %</label><input type="number" id="f-spown" min="0" max="100" placeholder="22"></div>
+
+        <!-- SP flags — DK shows both, FD shows one -->
+        <div class="flag-group" id="fg-sp-dk">
+          <div class="flag-label">Pitcher ownership (DK — 2 pitchers)</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="sp-dk" data-value="low-low"     onclick="setFlag('sp-dk','low-low',this)">Low / Low</button>
+            <button type="button" class="flag-btn" data-group="sp-dk" data-value="low-high"    onclick="setFlag('sp-dk','low-high',this)">Low / High</button>
+            <button type="button" class="flag-btn" data-group="sp-dk" data-value="high-high"   onclick="setFlag('sp-dk','high-high',this)">High / High</button>
+          </div>
         </div>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>Primary stack</label><input type="text" id="f-stack" placeholder="e.g. NYY 4-man (1-2-3-4)"></div>
-          <div class="field"><label>Stack proj own %</label><input type="number" id="f-stackown" min="0" max="100" placeholder="18"></div>
+        <div class="flag-group" id="fg-sp-fd" style="display:none">
+          <div class="flag-label">Pitcher ownership (FD — 1 pitcher)</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="sp-fd" data-value="low"  onclick="setFlag('sp-fd','low',this)">Low owned</button>
+            <button type="button" class="flag-btn" data-group="sp-fd" data-value="high" onclick="setFlag('sp-fd','high',this)">High owned</button>
+          </div>
         </div>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>Bring-back</label><input type="text" id="f-bringback" placeholder="e.g. J. Verdugo (BOS) vs Cole"></div>
-          <div class="field"><label>Leverage play (low-owned pivot)</label><input type="text" id="f-leverage" placeholder="e.g. A. Judge 8%"></div>
+
+        <!-- Stack flags -->
+        <div class="flag-group" style="margin-top:14px">
+          <div class="flag-label">Primary stack ownership</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="stack-own" data-value="low"  onclick="setFlag('stack-own','low',this)">Low owned</button>
+            <button type="button" class="flag-btn" data-group="stack-own" data-value="high" onclick="setFlag('stack-own','high',this)">High owned</button>
+          </div>
+        </div>
+        <div class="flag-group" style="margin-top:14px">
+          <div class="flag-label">Stack size</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="stack-size" data-value="3man" onclick="setFlag('stack-size','3man',this)">3-man</button>
+            <button type="button" class="flag-btn" data-group="stack-size" data-value="4man" onclick="setFlag('stack-size','4man',this)">4-man</button>
+            <button type="button" class="flag-btn" data-group="stack-size" data-value="5man" onclick="setFlag('stack-size','5man',this)">5-man</button>
+          </div>
+        </div>
+        <div class="flag-group" style="margin-top:14px">
+          <div class="flag-label">Bring-back</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="bringback" data-value="yes" onclick="setFlag('bringback','yes',this)">Yes</button>
+            <button type="button" class="flag-btn" data-group="bringback" data-value="no"  onclick="setFlag('bringback','no',this)">No</button>
+          </div>
         </div>
 
         <div class="divider">Projections &amp; environment</div>
-        <div class="form-grid three">
-          <div class="field"><label>Proj source</label>
-            <select id="f-proj">
-              <option value="">—</option><option>SplashPlay</option><option>Stokastic</option><option>Both</option><option>Manual</option>
-            </select>
-          </div>
-          <div class="field"><label>Vegas total</label><input type="number" id="f-vegas" step="0.5" placeholder="8.5"></div>
-          <div class="field"><label>Weather</label>
-            <select id="f-wx">
-              <option value="">—</option><option>Clear</option><option>Partly Cloudy</option><option>Rain Risk</option><option>Dome</option><option>Cold (&lt;50°F)</option>
-            </select>
+        <div class="flag-group">
+          <div class="flag-label">Projection source</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="proj" data-value="SplashPlay" onclick="setFlag('proj','SplashPlay',this)">SplashPlay</button>
+            <button type="button" class="flag-btn" data-group="proj" data-value="Stokastic"  onclick="setFlag('proj','Stokastic',this)">Stokastic</button>
+            <button type="button" class="flag-btn" data-group="proj" data-value="Both"       onclick="setFlag('proj','Both',this)">Both</button>
           </div>
         </div>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>Projection edge note</label><textarea id="f-edge" placeholder="e.g. SplashPlay +2.1 K vs Stokastic on Cole — going higher"></textarea></div>
-          <div class="field">
-            <label>Wind</label><input type="text" id="f-wind" placeholder="e.g. 12 mph out to CF" style="margin-bottom:8px">
-            <label>Max entries allowed</label><input type="number" id="f-maxent" placeholder="150">
+        <div class="flag-group" style="margin-top:14px">
+          <div class="flag-label">SP projection edge vs other source</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="proj-edge" data-value="higher" onclick="setFlag('proj-edge','higher',this)">SP higher on SplashPlay</button>
+            <button type="button" class="flag-btn" data-group="proj-edge" data-value="lower"  onclick="setFlag('proj-edge','lower',this)">SP higher on Stokastic</button>
+            <button type="button" class="flag-btn" data-group="proj-edge" data-value="agree"  onclick="setFlag('proj-edge','agree',this)">Sources agree</button>
           </div>
+        </div>
+        <div class="flag-group" style="margin-top:14px">
+          <div class="flag-label">Weather / wind</div>
+          <div class="flag-row">
+            <button type="button" class="flag-btn" data-group="wx" data-value="Clear"      onclick="setFlag('wx','Clear',this)">Clear</button>
+            <button type="button" class="flag-btn" data-group="wx" data-value="Wind-out"   onclick="setFlag('wx','Wind-out',this)">Wind out</button>
+            <button type="button" class="flag-btn" data-group="wx" data-value="Wind-in"    onclick="setFlag('wx','Wind-in',this)">Wind in</button>
+            <button type="button" class="flag-btn" data-group="wx" data-value="Rain-risk"  onclick="setFlag('wx','Rain-risk',this)">Rain risk</button>
+            <button type="button" class="flag-btn" data-group="wx" data-value="Dome"       onclick="setFlag('wx','Dome',this)">Dome</button>
+            <button type="button" class="flag-btn" data-group="wx" data-value="Cold"       onclick="setFlag('wx','Cold',this)">Cold</button>
+          </div>
+        </div>
+        <div class="form-grid three" style="margin-top:14px">
+          <div class="field"><label>Vegas total</label><input type="number" id="f-vegas" step="0.5" placeholder="8.5"></div>
+          <div class="field"><label>Max entries</label><input type="number" id="f-maxent" placeholder="150"></div>
+          <div class="field"><label>Notes (optional)</label><input type="text" id="f-edge" placeholder="Any quick note"></div>
         </div>
 
         <div class="btn-row">

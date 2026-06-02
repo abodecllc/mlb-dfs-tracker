@@ -451,3 +451,42 @@ tr:hover td { background: var(--gray-50); }
   min-width: 20px;
 }
 .checklist li.done .step-num { color: var(--gray-300); }
+
+/* ── Flag buttons ─────────────────────────────────────────────────────────── */
+.flag-group { }
+.flag-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 6px;
+}
+.flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.flag-btn {
+  border: 1.5px solid var(--gray-300);
+  background: #fff;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--gray-600);
+  transition: all .15s;
+  font-family: inherit;
+  line-height: 1;
+}
+.flag-btn:hover {
+  border-color: var(--green);
+  color: var(--green);
+  background: var(--green-light);
+}
+.flag-btn.selected {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}

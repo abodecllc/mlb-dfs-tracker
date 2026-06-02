@@ -12,10 +12,37 @@ function persistSlates() {
   localStorage.setItem(STORE_KEY, JSON.stringify(slates));
 }
 
+// ── Flag state ────────────────────────────────────────────────────────────────
+const flags = {};
+
+function setFlag(group, value, btn) {
+  flags[group] = value;
+  document.querySelectorAll(`.flag-btn[data-group="${group}"]`).forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+function clearFlags() {
+  Object.keys(flags).forEach(k => delete flags[k]);
+  document.querySelectorAll('.flag-btn').forEach(b => b.classList.remove('selected'));
+}
+
+function getFlag(group) { return flags[group] || null; }
+
+function onSiteChange() {
+  const site = gv('f-site');
+  const dk = document.getElementById('fg-sp-dk');
+  const fd = document.getElementById('fg-sp-fd');
+  if (!dk || !fd) return;
+  if (site === 'FD') { dk.style.display = 'none'; fd.style.display = 'block'; }
+  else               { dk.style.display = 'block'; fd.style.display = 'none'; }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   slates = loadSlates();
   document.getElementById('f-date').value = todayISO();
+  const siteEl = document.getElementById('f-site');
+  if (siteEl) siteEl.addEventListener('change', onSiteChange);
   setupDrop();
   renderAll();
   renderChecklist();
@@ -55,29 +82,29 @@ function saveSlate() {
   }
   const fee     = parseFloat(gv('f-fee')) || 0;
   const lineups = parseInt(gv('f-lineups')) || 1;
+  const site    = gv('f-site');
+  const spFlag  = site === 'FD' ? getFlag('sp-fd') : getFlag('sp-dk');
   const slate = {
-    id:         Date.now(),
-    date:       gv('f-date'),
-    site:       gv('f-site'),
-    slateType:  gv('f-slate'),
-    contest:    gv('f-contest'),
-    ctype:      gv('f-ctype'),
+    id:          Date.now(),
+    date:        gv('f-date'),
+    site,
+    slateType:   gv('f-slate'),
+    contest:     gv('f-contest'),
+    ctype:       gv('f-ctype'),
     fee,
     lineups,
-    field:      parseInt(gv('f-field'))   || null,
-    maxEntries: parseInt(gv('f-maxent'))  || null,
-    invested:   +(fee * lineups).toFixed(2),
-    sp:         gv('f-sp'),
-    spOwn:      parseFloat(gv('f-spown')) || null,
-    stack:      gv('f-stack'),
-    stackOwn:   parseFloat(gv('f-stackown')) || null,
-    bringback:  gv('f-bringback'),
-    leverage:   gv('f-leverage'),
-    projSource: gv('f-proj'),
-    edgeNote:   gv('f-edge'),
-    vegas:      parseFloat(gv('f-vegas')) || null,
-    wind:       gv('f-wind'),
-    wx:         gv('f-wx'),
+    field:       parseInt(gv('f-field'))  || null,
+    maxEntries:  parseInt(gv('f-maxent')) || null,
+    invested:    +(fee * lineups).toFixed(2),
+    spOwnership: spFlag,
+    stackOwn:    getFlag('stack-own'),
+    stackSize:   getFlag('stack-size'),
+    bringback:   getFlag('bringback'),
+    projSource:  getFlag('proj'),
+    projEdge:    getFlag('proj-edge'),
+    wx:          getFlag('wx'),
+    vegas:       parseFloat(gv('f-vegas')) || null,
+    edgeNote:    gv('f-edge'),
     score: null, fieldAvg: null, finish: null,
     cashed: null, winnings: null, pl: null, hasResults: false,
   };
@@ -90,11 +117,12 @@ function saveSlate() {
 
 function clearForm() {
   ['f-site','f-slate','f-contest','f-ctype','f-fee','f-lineups','f-field','f-maxent',
-   'f-sp','f-spown','f-stack','f-stackown','f-bringback','f-leverage',
-   'f-proj','f-edge','f-vegas','f-wind','f-wx'].forEach(id => {
+   'f-vegas','f-edge','f-maxent'].forEach(id => {
     const el = g(id); if (el) el.value = '';
   });
   g('f-date').value = todayISO();
+  clearFlags();
+  onSiteChange();
 }
 
 // ── CSV parsing ───────────────────────────────────────────────────────────────
@@ -421,8 +449,8 @@ function renderHistory() {
     <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${s.contest}">${s.contest}</td>
     <td><span class="badge ${s.ctype && s.ctype.startsWith('Cash') ? 'cash' : 'gpp'}">${s.ctype || '—'}</span></td>
     <td>$${s.invested.toFixed(2)}</td>
-    <td>${s.sp || '—'}</td>
-    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${s.stack || '—'}</td>
+    <td>${s.spOwnership || '—'}</td>
+    <td>${[s.stackOwn, s.stackSize].filter(Boolean).join(' ') || '—'}</td>
     <td>${s.hasResults ? (s.score != null ? s.score.toFixed(1) : '—') : '<span style="color:var(--gray-400);font-size:11px">pending</span>'}</td>
     <td>${s.hasResults ? (s.cashed || '—') : '—'}</td>
     <td>${s.hasResults
@@ -438,7 +466,7 @@ function renderHistory() {
   g('hist-table').innerHTML = `<table>
     <thead><tr>
       <th>Date</th><th>Site</th><th>Contest</th><th>Type</th><th>Invested</th>
-      <th>SP</th><th>Stack</th><th>Score</th><th>Cash</th><th>P/L</th><th></th>
+      <th>SP own</th><th>Stack</th><th>Score</th><th>Cash</th><th>P/L</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -455,12 +483,12 @@ function deleteSlate(id) {
 // ── Export CSV ────────────────────────────────────────────────────────────────
 function exportCSV() {
   const headers = ['Date','Site','Slate Type','Contest','Contest Type','Fee','Lineups','Invested',
-    'SP','SP Own%','Stack','Stack Own%','Bring-Back','Leverage','Proj Source','Edge Note',
-    'Vegas Total','Wind','Weather','Score','Field Avg','Finish','Cashed','Winnings','P/L'];
+    'SP Ownership','Stack Own','Stack Size','Bring-Back','Proj Source','Proj Edge','Weather',
+    'Vegas Total','Edge Note','Score','Field Avg','Finish','Cashed','Winnings','P/L'];
   const rows = slates.map(s => [
     s.date,s.site,s.slateType,s.contest,s.ctype,s.fee,s.lineups,s.invested,
-    s.sp,s.spOwn,s.stack,s.stackOwn,s.bringback,s.leverage,s.projSource,s.edgeNote,
-    s.vegas,s.wind,s.wx,s.score,s.fieldAvg,s.finish,s.cashed,s.winnings,s.pl,
+    s.spOwnership,s.stackOwn,s.stackSize,s.bringback,s.projSource,s.projEdge,s.wx,
+    s.vegas,s.edgeNote,s.score,s.fieldAvg,s.finish,s.cashed,s.winnings,s.pl,
   ].map(v => v == null ? '' : `"${String(v).replace(/"/g, '""')}"`));
   const csv  = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
   const a    = document.createElement('a');
