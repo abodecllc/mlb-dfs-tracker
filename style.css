@@ -546,3 +546,12 @@ tr:hover td { background: var(--gray-50); }
 .bd-table td { padding: 5px 6px; border-bottom: 1px solid var(--gray-100); }
 .bd-table tr:last-child td { border-bottom: none; }
 .bd-table tr:hover td { background: var(--gray-50); }
+
+/* ── Import date filter row ───────────────────────────────────────────────── */
+.date-filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}

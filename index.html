@@ -136,6 +136,16 @@
             <strong>FD:</strong> My Contests → Past Contests → Download CSV<br>
             <span style="color:var(--gray-500);font-size:11px;margin-top:4px;display:block">Site is auto-detected from the file. Each row = one lineup entry.</span>
           </div>
+          <div class="date-filter-row">
+            <div class="field" style="flex:1;min-width:180px">
+              <label>Filter to date <span style="font-weight:400;color:var(--gray-400)">(optional — use with full-history exports)</span></label>
+              <input type="date" id="import-date">
+            </div>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=yesterdayISO()">Yesterday</button>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=todayISO()">Today</button>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=''">Clear</button>
+          </div>
+
           <div class="drop-zone" id="drop-zone" onclick="document.getElementById('csv-file').click()">
             <i class="ti ti-file-spreadsheet"></i>
             <p>Drop DK or FD results CSV here</p>

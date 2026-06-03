@@ -37,6 +37,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function todayISO() { return new Date().toISOString().split('T')[0]; }
+function yesterdayISO() {
+  const d = new Date(); d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
 
 // ── Site toggle (pitcher flags) ───────────────────────────────────────────────
 function onSiteChange() {
@@ -292,8 +296,14 @@ function handleFile(file) {
     const headers = Object.keys(rows[0]);
     const site = detectSite(headers);
     if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
-    const norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
+    let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
     if (!norm.length) { showAlert('import-alert', `No MLB rows found. Check this is a ${site} MLB export.`, 'danger'); return; }
+    // Apply date filter if set
+    const filterDate = (g('import-date') || {}).value;
+    if (filterDate) {
+      norm = norm.filter(r => r.date === filterDate);
+      if (!norm.length) { showAlert('import-alert', `No rows found for ${filterDate}. Check the date filter.`, 'danger'); return; }
+    }
     pendingMatches = matchResults(norm, site);
     renderMatchStep(site);
   };
