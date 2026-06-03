@@ -193,12 +193,16 @@ function parseDKDate(str) {
   return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
 }
 
-// Parse FD date: "6/1/2026" → "2026-06-01"
+// Parse FD date: handles "6/1/2026" and "2026/06/03"
 function parseFDDate(str) {
-  const m = str.match(/^(\d+)\/(\d+)\/(\d+)/);
-  if (!m) return null;
-  const [, mo, d, y] = m;
-  return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  if (!str) return null;
+  // Format: YYYY/MM/DD
+  const iso = str.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  // Format: M/D/YYYY
+  const us = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  return null;
 }
 
 function detectSite(headers) {
@@ -298,11 +302,17 @@ function handleFile(file) {
     if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
     let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
     if (!norm.length) { showAlert('import-alert', `No MLB rows found. Check this is a ${site} MLB export.`, 'danger'); return; }
-    // Apply date filter if set
+    // Apply date filter if set — rows with unparseable dates are excluded when filter is active
     const filterDate = (g('import-date') || {}).value;
     if (filterDate) {
       norm = norm.filter(r => r.date === filterDate);
-      if (!norm.length) { showAlert('import-alert', `No rows found for ${filterDate}. Check the date filter.`, 'danger'); return; }
+      if (!norm.length) { showAlert('import-alert', `No rows found for ${filterDate}. Check the date filter or the date format in the file.`, 'danger'); return; }
+    } else {
+      // No date filter set — warn if file looks like full history (>50 rows)
+      if (norm.length > 50) {
+        const proceed = confirm(`${norm.length} lineup rows found — this looks like a full history export. Set a date filter to narrow to a specific slate, or click OK to import all.`);
+        if (!proceed) return;
+      }
     }
     pendingMatches = matchResults(norm, site);
     renderMatchStep(site);
