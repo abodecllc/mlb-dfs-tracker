@@ -1,40 +1,23 @@
 // ── Storage ───────────────────────────────────────────────────────────────────
-const STORE_KEY = 'mlb_dfs_slates';
-const CHECK_KEY = 'mlb_dfs_checks';
+const STORE_KEY = 'mlb_dfs_entries';
+let entries = [];
 
-let slates = [];
-let pendingMatches = [];
-let lastSaved = null; // for carry-forward
-
-function loadSlates() {
+function loadEntries() {
   try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }
 }
-function persistSlates() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(slates));
+function persist() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(entries));
 }
 
-// ── Flag state ────────────────────────────────────────────────────────────────
-const flags = {};
-
-function setFlag(group, value, btn) {
-  flags[group] = value;
-  document.querySelectorAll(`.flag-btn[data-group="${group}"]`).forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-}
-function clearFlags() {
-  Object.keys(flags).forEach(k => delete flags[k]);
-  document.querySelectorAll('.flag-btn').forEach(b => b.classList.remove('selected'));
-}
-function getFlag(g) { return flags[g] || null; }
-
-// ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  slates = loadSlates();
-  g('f-date').value = todayISO();
+  entries = loadEntries();
   setupDrop();
   renderAll();
-  renderChecklist();
 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function g(id)  { return document.getElementById(id); }
+function gv(id) { const e = g(id); return e ? e.value.trim() : ''; }
 
 function todayISO() { return new Date().toISOString().split('T')[0]; }
 function yesterdayISO() {
@@ -42,40 +25,13 @@ function yesterdayISO() {
   return d.toISOString().split('T')[0];
 }
 
-// ── Site toggle (pitcher flags) ───────────────────────────────────────────────
-function onSiteChange() {
-  const site = gv('f-site');
-  const dk = g('fg-sp-dk'), fd = g('fg-sp-fd');
-  if (!dk || !fd) return;
-  // clear any sp flag since options changed
-  delete flags['sp'];
-  document.querySelectorAll('.flag-btn[data-group="sp"]').forEach(b => b.classList.remove('selected'));
-  if (site === 'FD') { dk.style.display = 'none'; fd.style.display = 'block'; }
-  else               { dk.style.display = 'block'; fd.style.display = 'none'; }
+function showAlert(id, msg, type = 'success') {
+  const el = g(id); if (!el) return;
+  const icon = type === 'success' ? 'check' : type === 'danger' ? 'alert-circle' : 'info-circle';
+  el.innerHTML = `<div class="alert ${type}"><i class="ti ti-${icon}"></i>${msg}</div>`;
+  setTimeout(() => { el.innerHTML = ''; }, 6000);
 }
 
-// ── Carry-forward ─────────────────────────────────────────────────────────────
-function showCarryBar(s) {
-  const bar = g('carry-bar');
-  g('carry-label').textContent = `Last saved: ${s.contest} · ${s.site} · ${s.date}`;
-  bar.style.display = 'flex';
-}
-function applyCarry() {
-  if (!lastSaved) return;
-  const s = lastSaved;
-  g('f-date').value    = s.date    || todayISO();
-  g('f-site').value    = s.site    || '';
-  g('f-slate').value   = s.slateType || '';
-  g('f-contest').value = s.contest || '';
-  g('f-ctype').value   = s.ctype   || '';
-  g('f-fee').value     = s.fee     || '';
-  g('f-maxent').value  = s.maxEntries || '';
-  onSiteChange();
-  g('carry-bar').style.display = 'none';
-}
-function dismissCarry() { g('carry-bar').style.display = 'none'; }
-
-// ── Tab navigation ────────────────────────────────────────────────────────────
 function showTab(name, el) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -83,70 +39,39 @@ function showTab(name, el) {
   el.classList.add('active');
   if (name === 'dashboard') renderDashboard();
   if (name === 'history')   renderHistory();
-  if (name === 'results')   renderPendingSelect();
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function g(id)  { return document.getElementById(id); }
-function gv(id) { const e = g(id); return e ? e.value.trim() : ''; }
+// ── Contest classifier ────────────────────────────────────────────────────────
+// Returns 'Cash' or 'GPP' based on contest name and optional FD opponent field
+function classifyContest(name, opponent) {
+  // FD provides Opponent field: "Tournament" = GPP, otherwise cash
+  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash';
 
-function showAlert(id, msg, type = 'success') {
-  const el = g(id); if (!el) return;
-  const icon = type === 'success' ? 'check' : type === 'danger' ? 'alert-circle' : 'info-circle';
-  el.innerHTML = `<div class="alert ${type}"><i class="ti ti-${icon}"></i>${msg}</div>`;
-  setTimeout(() => { el.innerHTML = ''; }, 5000);
-}
+  const n = (name || '').toLowerCase();
 
-function roiStr(invested, pl) {
-  if (!invested) return '—';
-  return ((pl / invested) * 100).toFixed(1) + '%';
-}
+  const cashPatterns = [
+    /double.?up/i, /50.?50/i, /fifty.?fifty/i,
+    /head.?to.?head/i, /\bh2h\b/i, /\bduel\b/i,
+    /multiplier/i, /\bsatellite\b/i,
+    /\b(2|3|4|5|6|7|8|9|10).?x\b/i,   // 2x, 3x multiplier
+    /\bsolo shot\b/i,                   // DK Solo Shot = Double Up
+  ];
 
-// ── Save lineup ───────────────────────────────────────────────────────────────
-function saveLineup() {
-  if (!gv('f-date') || !gv('f-site') || !gv('f-contest')) {
-    showAlert('log-alert', 'Date, Site, and Contest name are required.', 'info');
-    return;
+  for (const p of cashPatterns) {
+    if (p.test(n)) return 'Cash';
   }
-  const fee  = parseFloat(gv('f-fee')) || 0;
-  const site = gv('f-site');
-  const lineup = {
-    id:          Date.now(),
-    date:        gv('f-date'),
-    site,
-    slateType:   gv('f-slate'),
-    contest:     gv('f-contest'),
-    ctype:       gv('f-ctype'),
-    fee,
-    invested:    fee,           // 1 lineup = 1 entry fee
-    maxEntries:  parseInt(gv('f-maxent')) || null,
-    sp:          getFlag('sp'),
-    stackOwn:    getFlag('stackOwn'),
-    stackSize:   getFlag('stackSize'),
-    bringback:   getFlag('bringback'),
-    proj:        getFlag('proj'),
-    note:        gv('f-note'),
-    // results (filled later)
-    score: null, finish: null, field: null,
-    cashed: null, winnings: null, pl: null, hasResults: false,
-  };
-  slates.unshift(lineup);
-  persistSlates();
-  lastSaved = lineup;
-  showAlert('log-alert', 'Lineup saved. Log the next one or add results after the slate.');
-  clearForm();
-  showCarryBar(lineup);
-  renderAll();
+  return 'GPP';
 }
 
-function clearForm() {
-  ['f-slate','f-contest','f-ctype','f-fee','f-maxent','f-note'].forEach(id => {
-    const el = g(id); if (el) el.value = '';
-  });
-  // keep date & site, clear construction flags only
-  delete flags['sp']; delete flags['stackOwn']; delete flags['stackSize'];
-  delete flags['bringback']; delete flags['proj'];
-  document.querySelectorAll('.flag-btn').forEach(b => b.classList.remove('selected'));
+// Finer-grained contest type label within the class
+function contestType(name, opponent) {
+  const n = (name || '').toLowerCase();
+  if (/double.?up/i.test(n) || /solo shot/i.test(n)) return 'Double Up';
+  if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n))  return '50/50';
+  if (/head.?to.?head/i.test(n) || /\bh2h\b/i.test(n) || /\bduel\b/i.test(n)) return 'H2H';
+  if (/multiplier/i.test(n) || /\d.?x\b/i.test(n))   return 'Multiplier';
+  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash — Other';
+  return 'GPP';
 }
 
 // ── CSV parsing ───────────────────────────────────────────────────────────────
@@ -180,26 +105,21 @@ function parseMoney(str) {
   return parseFloat((str || '0').replace(/[$, ]/g, '')) || 0;
 }
 
-// Strip DK multi-entry suffix: "MLB $2.5K Solo Shot (3/5)" → "MLB $2.5K Solo Shot"
 function stripDKSuffix(name) {
   return name.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
 }
 
-// Parse DK date: "6/1/2026 19:10" → "2026-06-01"
 function parseDKDate(str) {
-  const m = str.match(/^(\d+)\/(\d+)\/(\d+)/);
+  const m = (str || '').match(/^(\d+)\/(\d+)\/(\d+)/);
   if (!m) return null;
   const [, mo, d, y] = m;
   return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
 }
 
-// Parse FD date: handles "6/1/2026" and "2026/06/03"
 function parseFDDate(str) {
   if (!str) return null;
-  // Format: YYYY/MM/DD
   const iso = str.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  // Format: M/D/YYYY
   const us = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
   return null;
@@ -208,7 +128,7 @@ function parseFDDate(str) {
 function detectSite(headers) {
   const h = headers.join(',');
   if (h.includes('entry_key') || h.includes('contest_key') || h.includes('winnings_non_ticket')) return 'DK';
-  if (h.includes('entry id') || h.includes('salary cap') || h.includes('salarycap'))             return 'FD';
+  if (h.includes('entry id')  || h.includes('salarycap')   || h.includes('salary cap'))         return 'FD';
   return null;
 }
 
@@ -216,19 +136,18 @@ function normalizeDK(rows) {
   return rows
     .filter(r => (r['sport'] || '').toUpperCase() === 'MLB')
     .map(r => {
-      const rawContest = r['entry'] || '';
-      const contest    = stripDKSuffix(rawContest);
+      const contest    = stripDKSuffix(r['entry'] || '');
       const pts        = parseFloat(r['points']) || 0;
       const rank       = parseInt(r['place']) || null;
-      const winCash    = parseMoney(r['winnings_non_ticket']);
-      const winTicket  = parseMoney(r['winnings_ticket']);
-      const win        = +(winCash + winTicket).toFixed(2);
+      const win        = +(parseMoney(r['winnings_non_ticket']) + parseMoney(r['winnings_ticket'])).toFixed(2);
       const placesPaid = parseInt(r['places_paid']) || 0;
       const entries    = parseInt(r['contest_entries']) || null;
       const fee        = parseMoney(r['entry_fee']);
       const date       = parseDKDate(r['contest_date_est'] || '');
       const cashed     = placesPaid > 0 && rank !== null ? (rank <= placesPaid ? 'Y' : 'N') : (win > 0 ? 'Y' : 'N');
-      return { contest, pts, rank, win, entries, fee, date, cashed, raw: rawContest };
+      const cls        = classifyContest(contest, null);
+      const ctype      = contestType(contest, null);
+      return { contest, pts, rank, win, entries, fee, date, cashed, cls, ctype };
     })
     .filter(r => r.contest);
 }
@@ -237,50 +156,34 @@ function normalizeFD(rows) {
   return rows
     .filter(r => (r['sport'] || '').toLowerCase() === 'mlb')
     .map(r => {
-      const contest = (r['title'] || '').trim();
-      const pts     = parseFloat(r['score']) || 0;
-      const rank    = parseInt(r['position']) || null;
-      const win     = parseMoney(r['winnings ($)']);
-      const entries = parseInt(r['entries']) || null;
-      const fee     = parseMoney(r['entry ($)']);
-      const date    = parseFDDate(r['date'] || '');
-      const cashed  = win > 0 ? 'Y' : 'N';
-      return { contest, pts, rank, win, entries, fee, date, cashed };
+      const contest  = (r['title'] || '').trim();
+      const pts      = parseFloat(r['score']) || 0;
+      const rank     = parseInt(r['position']) || null;
+      const win      = parseMoney(r['winnings ($)']);
+      const entries  = parseInt(r['entries']) || null;
+      const fee      = parseMoney(r['entry ($)']);
+      const date     = parseFDDate(r['date'] || '');
+      const opponent = r['opponent'] || '';
+      const cashed   = win > 0 ? 'Y' : 'N';
+      const cls      = classifyContest(contest, opponent);
+      const ctype    = contestType(contest, opponent);
+      return { contest, pts, rank, win, entries, fee, date, cashed, cls, ctype };
     })
     .filter(r => r.contest);
 }
 
-// ── Fuzzy match ───────────────────────────────────────────────────────────────
-function normalize(s) {
-  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function fuzzyScore(a, b) {
-  a = normalize(a); b = normalize(b);
-  if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.9;
-  const aW = new Set(a.split(' ').filter(w => w.length > 2));
-  const bW = b.split(' ').filter(w => w.length > 2);
-  const shared = bW.filter(w => aW.has(w)).length;
-  return shared / Math.max(aW.size, bW.length, 1);
-}
-
-// Match each CSV row to a pending logged lineup.
-// Match criteria: contest name fuzzy + same date (if date available) + same fee (if available)
-function matchResults(csvRows, site) {
-  const pending = slates.filter(s => !s.hasResults && s.site === site);
-  return csvRows.map(csvRow => {
-    let best = null, bestScore = 0;
-    pending.forEach(lineup => {
-      let score = fuzzyScore(csvRow.contest, lineup.contest);
-      // Boost for same date
-      if (csvRow.date && lineup.date && csvRow.date === lineup.date) score += 0.15;
-      // Boost for same fee
-      if (csvRow.fee && lineup.fee && Math.abs(csvRow.fee - lineup.fee) < 0.01) score += 0.1;
-      if (score > bestScore) { bestScore = score; best = lineup; }
-    });
-    return { csvRow, lineup: bestScore >= 0.5 ? best : null, matchScore: bestScore, manualId: null };
-  });
+// ── Date filter helpers ───────────────────────────────────────────────────────
+function setImportDateRange(preset) {
+  const from = g('import-date-from'), to = g('import-date-to');
+  if (!from || !to) return;
+  if (preset === 'clear')     { from.value = ''; to.value = ''; return; }
+  if (preset === 'today')     { from.value = todayISO();     to.value = todayISO();     return; }
+  if (preset === 'yesterday') { from.value = yesterdayISO(); to.value = yesterdayISO(); return; }
+  if (preset === 'week') {
+    const d = new Date(); d.setDate(d.getDate() - 6);
+    from.value = d.toISOString().split('T')[0];
+    to.value   = todayISO();
+  }
 }
 
 // ── Import flow ───────────────────────────────────────────────────────────────
@@ -292,352 +195,311 @@ function setupDrop() {
 }
 
 function handleFile(file) {
-  if (!file || !file.name.endsWith('.csv')) { showAlert('import-alert', 'Please upload a .csv file.', 'danger'); return; }
+  if (!file || !file.name.endsWith('.csv')) {
+    showAlert('import-alert', 'Please upload a .csv file.', 'danger'); return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     const rows = parseCSV(e.target.result);
     if (!rows.length) { showAlert('import-alert', 'Could not parse CSV.', 'danger'); return; }
-    const headers = Object.keys(rows[0]);
-    const site = detectSite(headers);
+    const site = detectSite(Object.keys(rows[0]));
     if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
+
     let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
-    if (!norm.length) { showAlert('import-alert', `No MLB rows found. Check this is a ${site} MLB export.`, 'danger'); return; }
-    // Apply date filter if set — rows with unparseable dates are excluded when filter is active
-    const filterDate = (g('import-date') || {}).value;
-    if (filterDate) {
-      norm = norm.filter(r => r.date === filterDate);
-      if (!norm.length) { showAlert('import-alert', `No rows found for ${filterDate}. Check the date filter or the date format in the file.`, 'danger'); return; }
-    } else {
-      // No date filter set — warn if file looks like full history (>50 rows)
-      if (norm.length > 50) {
-        const proceed = confirm(`${norm.length} lineup rows found — this looks like a full history export. Set a date filter to narrow to a specific slate, or click OK to import all.`);
-        if (!proceed) return;
+    if (!norm.length) { showAlert('import-alert', `No MLB rows found in this file.`, 'danger'); return; }
+
+    // Date range filter
+    const dateFrom = gv('import-date-from');
+    const dateTo   = gv('import-date-to');
+    if (dateFrom || dateTo) {
+      norm = norm.filter(r => {
+        if (!r.date) return false;
+        if (dateFrom && r.date < dateFrom) return false;
+        if (dateTo   && r.date > dateTo)   return false;
+        return true;
+      });
+      if (!norm.length) {
+        showAlert('import-alert', 'No rows found in that date range. Check the filter or clear it.', 'danger'); return;
       }
+    } else if (norm.length > 50) {
+      const go = confirm(`${norm.length} lineup rows found with no date filter — this looks like a full history export.\n\nUse the date range filter to narrow to a specific slate, or click OK to import all.`);
+      if (!go) return;
     }
-    pendingMatches = matchResults(norm, site);
-    renderMatchStep(site);
+
+    renderPreview(norm, site);
   };
   reader.readAsText(file);
 }
 
-function renderMatchStep(site) {
+let pendingRows = [];
+
+function renderPreview(rows, site) {
+  pendingRows = rows;
   g('import-step1').style.display = 'none';
   g('import-step2').style.display = 'block';
-  const matched   = pendingMatches.filter(m => m.lineup).length;
-  const unmatched = pendingMatches.length - matched;
-  const pending   = slates.filter(s => !s.hasResults && s.site === site);
+
+  const gppCount  = rows.filter(r => r.cls === 'GPP').length;
+  const cashCount = rows.filter(r => r.cls === 'Cash').length;
+  const totalWin  = rows.reduce((a, r) => a + r.win, 0);
+  const totalFee  = rows.reduce((a, r) => a + r.fee, 0);
 
   g('import-summary').innerHTML = `
-    <h3>Import preview — ${site} (${pendingMatches.length} lineup rows)</h3>
-    <div class="summary-row"><span>Auto-matched</span><strong class="pos">${matched}</strong></div>
-    <div class="summary-row"><span>Unmatched (manual assign or skip)</span><strong class="${unmatched ? 'neg' : ''}">${unmatched}</strong></div>
-    <div class="summary-row"><span>Pending logged lineups for ${site}</span><strong>${pending.length}</strong></div>`;
+    <h3>${site} — ${rows.length} lineup${rows.length !== 1 ? 's' : ''} ready to import</h3>
+    <div class="summary-row"><span>GPP lineups</span><strong>${gppCount}</strong></div>
+    <div class="summary-row"><span>Cash lineups</span><strong>${cashCount}</strong></div>
+    <div class="summary-row"><span>Total entry fees</span><strong>$${totalFee.toFixed(2)}</strong></div>
+    <div class="summary-row"><span>Total winnings</span><strong>$${totalWin.toFixed(2)}</strong></div>
+    <div class="summary-row"><span>Net P/L</span><strong class="${totalWin - totalFee >= 0 ? 'pos' : 'neg'}">${totalWin - totalFee >= 0 ? '+' : ''}$${(totalWin - totalFee).toFixed(2)}</strong></div>`;
 
-  const pendingOpts = pending.map(s =>
-    `<option value="${s.id}">${s.date} · ${s.contest.substring(0,36)} · $${s.fee}</option>`).join('');
-
-  g('match-list').innerHTML = pendingMatches.map((m, i) => {
-    const c = m.csvRow;
-    const info = `${c.pts.toFixed(1)} pts · Rank ${c.rank || '?'} · $${c.win.toFixed(2)} · ${c.date || '?'}`;
-    if (m.lineup) {
-      return `<div class="match-row">
-        <div><div class="match-label">CSV row</div>
-          <div class="match-name" title="${c.contest}">${c.contest}</div>
-          <div class="match-meta">${info}</div></div>
-        <div class="match-arrow"><i class="ti ti-arrow-right"></i></div>
-        <div><div class="match-label">Matched lineup</div>
-          <div class="match-name" title="${m.lineup.contest}">${m.lineup.contest}</div>
-          <div class="match-meta">${m.lineup.date} · ${Math.round(m.matchScore * 100)}% confidence</div></div>
-        <div class="match-ok"><i class="ti ti-circle-check"></i></div>
-      </div>`;
-    }
-    return `<div class="match-row unmatched">
-      <div><div class="match-label">CSV row — no match found</div>
-        <div class="match-name" title="${c.contest}">${c.contest}</div>
-        <div class="match-meta">${info}</div></div>
-      <div class="match-arrow"><i class="ti ti-arrow-right"></i></div>
-      <div class="manual-match" style="grid-column:span 2">
-        <div class="match-label">Assign manually or skip</div>
-        <select onchange="setManualMatch(${i},this.value)">
-          <option value="">— skip —</option>${pendingOpts}
-        </select>
-      </div>
+  // Preview table — first 15 rows
+  const preview = rows.slice(0, 15);
+  const moreRows = rows.length > 15 ? `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);font-size:11px;padding:8px">… and ${rows.length - 15} more</td></tr>` : '';
+  g('preview-table').innerHTML = `
+    <div class="table-wrap" style="margin:1rem 0">
+      <table>
+        <thead><tr><th>Date</th><th>Contest</th><th>Class</th><th>Score</th><th>Rank</th><th>Fee</th><th>Winnings</th></tr></thead>
+        <tbody>
+          ${preview.map(r => `<tr>
+            <td>${r.date || '—'}</td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${r.contest}">${r.contest}</td>
+            <td><span class="badge ${r.cls === 'Cash' ? 'cash' : 'gpp'}">${r.cls}</span></td>
+            <td>${r.pts.toFixed(1)}</td>
+            <td>${r.rank || '—'}</td>
+            <td>$${r.fee.toFixed(2)}</td>
+            <td class="${r.win > 0 ? 'pos' : ''}">${r.win > 0 ? '$' + r.win.toFixed(2) : '—'}</td>
+          </tr>`).join('')}
+          ${moreRows}
+        </tbody>
+      </table>
     </div>`;
-  }).join('');
-}
-
-function setManualMatch(i, id) {
-  if (!id) { pendingMatches[i].lineup = null; return; }
-  const s = slates.find(x => x.id === parseInt(id));
-  if (s) { pendingMatches[i].lineup = s; pendingMatches[i].matchScore = 1; }
 }
 
 function confirmImport() {
-  let applied = 0;
-  pendingMatches.forEach(m => {
-    const target = m.lineup;
-    if (!target) return;
-    const c = m.csvRow;
-    target.score      = c.pts  || null;
-    target.finish     = c.rank || null;
-    target.winnings   = c.win;
-    target.cashed     = c.cashed;
-    target.pl         = +(c.win - target.invested).toFixed(2);
-    target.hasResults = true;
-    if (c.entries) target.field = c.entries;
-    applied++;
+  let added = 0, dupes = 0;
+  pendingRows.forEach(r => {
+    // Deduplicate: same date + contest + score + rank
+    const isDupe = entries.some(e =>
+      e.date === r.date && e.contest === r.contest &&
+      e.pts === r.pts   && e.rank   === r.rank
+    );
+    if (isDupe) { dupes++; return; }
+    entries.unshift({
+      id:      Date.now() + Math.random(),
+      date:    r.date,
+      site:    pendingRows._site || detectSiteFromRow(r),
+      contest: r.contest,
+      cls:     r.cls,
+      ctype:   r.ctype,
+      fee:     r.fee,
+      invested: r.fee,
+      pts:     r.pts,
+      rank:    r.rank,
+      field:   r.entries,
+      cashed:  r.cashed,
+      win:     r.win,
+      pl:      +(r.win - r.fee).toFixed(2),
+    });
+    added++;
   });
-  persistSlates();
+  persist();
   renderAll();
-  showAlert('import-alert', `Done — ${applied} lineup${applied !== 1 ? 's' : ''} updated.`);
+  const msg = dupes > 0
+    ? `Imported ${added} lineup${added !== 1 ? 's' : ''}. ${dupes} duplicate${dupes !== 1 ? 's' : ''} skipped.`
+    : `Imported ${added} lineup${added !== 1 ? 's' : ''}.`;
+  showAlert('import-alert', msg);
   resetImport();
 }
 
+// Site isn't stored on the row — infer from the file being processed
+// We'll tag pendingRows with _site in handleFile
+function detectSiteFromRow(r) { return r._site || ''; }
+
+// Patch handleFile to tag site on norm rows
+const _origHandleFile = handleFile;
+
+function handleFile(file) {
+  if (!file || !file.name.endsWith('.csv')) {
+    showAlert('import-alert', 'Please upload a .csv file.', 'danger'); return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if (!rows.length) { showAlert('import-alert', 'Could not parse CSV.', 'danger'); return; }
+    const site = detectSite(Object.keys(rows[0]));
+    if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
+
+    let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
+    if (!norm.length) { showAlert('import-alert', 'No MLB rows found in this file.', 'danger'); return; }
+
+    // Tag site on each row
+    norm.forEach(r => r._site = site);
+    norm._site = site;
+
+    const dateFrom = gv('import-date-from');
+    const dateTo   = gv('import-date-to');
+    if (dateFrom || dateTo) {
+      norm = norm.filter(r => {
+        if (!r.date) return false;
+        if (dateFrom && r.date < dateFrom) return false;
+        if (dateTo   && r.date > dateTo)   return false;
+        return true;
+      });
+      // Re-tag after filter
+      norm.forEach(r => r._site = site);
+      if (!norm.length) {
+        showAlert('import-alert', 'No rows found in that date range. Check the filter or clear it.', 'danger'); return;
+      }
+    } else if (norm.length > 50) {
+      const go = confirm(`${norm.length} lineup rows found with no date filter — this looks like a full history export.\n\nUse the date range filter to narrow to a specific slate, or click OK to import all.`);
+      if (!go) return;
+    }
+
+    renderPreview(norm, site);
+  };
+  reader.readAsText(file);
+}
+
 function resetImport() {
-  pendingMatches = [];
+  pendingRows = [];
   g('import-step1').style.display = 'block';
   g('import-step2').style.display = 'none';
   g('csv-file').value = '';
 }
 
-// ── Manual results ────────────────────────────────────────────────────────────
-function renderPendingSelect() {
-  const sel = g('pendingSelect');
-  const pending = slates.filter(s => !s.hasResults);
-  sel.innerHTML = '<option value="">— choose lineup —</option>' +
-    pending.map(s => `<option value="${s.id}">${s.date} · ${s.site} · ${s.contest} · $${s.fee}</option>`).join('');
-  g('res-form').style.display = 'none';
-}
-
-function loadPending() {
-  const id = parseInt(gv('pendingSelect')); if (!id) return;
-  const s = slates.find(x => x.id === id); if (!s) return;
-  g('res-summary').innerHTML =
-    `<strong>${s.contest}</strong> &nbsp;·&nbsp; ${s.site} &nbsp;·&nbsp; ${s.date} &nbsp;·&nbsp; Fee: <strong>$${s.fee}</strong>`;
-  ['r-score','r-finish','r-win','r-cash','r-field'].forEach(id => { const e = g(id); if (e) e.value = ''; });
-  g('res-form').style.display = 'block';
-}
-
-function saveResults() {
-  const id = parseInt(gv('pendingSelect'));
-  const s = slates.find(x => x.id === id); if (!s) return;
-  const win = parseFloat(gv('r-win')) || 0;
-  s.score      = parseFloat(gv('r-score'))  || null;
-  s.finish     = parseInt(gv('r-finish'))   || null;
-  s.field      = parseInt(gv('r-field'))    || s.field || null;
-  s.cashed     = gv('r-cash')               || null;
-  s.winnings   = win;
-  s.pl         = +(win - s.invested).toFixed(2);
-  s.hasResults = true;
-  persistSlates();
-  showAlert('res-alert', 'Results saved!');
-  renderPendingSelect();
-  g('res-form').style.display = 'none';
-  renderAll();
-}
-
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function renderDashboard() {
-  const complete = slates.filter(s => s.hasResults);
-  const invested = slates.reduce((a, s) => a + (s.invested || 0), 0);
-  const winnings = complete.reduce((a, s) => a + (s.winnings || 0), 0);
+  const all      = entries;
+  const invested = all.reduce((a, e) => a + (e.invested || 0), 0);
+  const winnings = all.reduce((a, e) => a + (e.win || 0), 0);
   const pl       = +(winnings - invested).toFixed(2);
   const roi      = invested > 0 ? pl / invested : 0;
-  const cashS    = complete.filter(s => s.ctype && s.ctype.startsWith('Cash'));
-  const cashWins = cashS.filter(s => s.cashed === 'Y').length;
-  const cashRate = cashS.length > 0 ? cashWins / cashS.length : null;
+
+  const cash     = all.filter(e => e.cls === 'Cash');
+  const cashWins = cash.filter(e => e.cashed === 'Y').length;
+  const cashRate = cash.length > 0 ? cashWins / cash.length : null;
 
   g('kpi-grid').innerHTML = [
-    ['Lineups logged', slates.length, '', ''],
-    ['Total invested', '$' + invested.toFixed(2), '', ''],
-    ['Total winnings', '$' + winnings.toFixed(2), '', ''],
-    ['Net P/L', (pl >= 0 ? '+' : '') + '$' + Math.abs(pl).toFixed(2), pl >= 0 ? 'pos' : 'neg', ''],
-    ['Overall ROI', (roi * 100).toFixed(1) + '%', roi >= 0 ? 'pos' : 'neg', ''],
-    ['Cash win rate', cashRate !== null ? (cashRate * 100).toFixed(0) + '%' : '—',
+    ['Total lineups',  all.length,                   '',                        ''],
+    ['Total invested', '$' + invested.toFixed(2),    '',                        ''],
+    ['Total winnings', '$' + winnings.toFixed(2),    '',                        ''],
+    ['Net P/L',        (pl >= 0 ? '+' : '-') + '$' + Math.abs(pl).toFixed(2),
+                       pl >= 0 ? 'pos' : 'neg',      ''],
+    ['Overall ROI',    (roi * 100).toFixed(1) + '%', roi >= 0 ? 'pos' : 'neg', ''],
+    ['Cash win rate',
+      cashRate !== null ? (cashRate * 100).toFixed(0) + '%' : '—',
       cashRate !== null ? (cashRate >= 0.52 ? 'pos' : 'neg') : '',
       cashRate !== null ? 'target ≥52%' : 'no cash lineups yet'],
-  ].map(([label, value, cls, sub]) =>
-    `<div class="kpi"><div class="kpi-label">${label}</div>
-     <div class="kpi-value ${cls}">${value}</div>
-     ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}</div>`).join('');
+  ].map(([label, val, cls, sub]) =>
+    `<div class="kpi">
+      <div class="kpi-label">${label}</div>
+      <div class="kpi-value ${cls}">${val}</div>
+      ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+    </div>`).join('');
 
-  // ── Construction & source breakdown tables ────────────────────────────────
-  const breakdowns = [
-    {
-      title: 'Pitcher ownership',
-      key: 'sp',
-      order: ['low-low','low-high','high-high','low','high'],
-      labels: { 'low-low':'Low/Low (DK)', 'low-high':'Low/High (DK)', 'high-high':'High/High (DK)', 'low':'Low (FD)', 'high':'High (FD)' },
-    },
-    {
-      title: 'Stack ownership',
-      key: 'stackOwn',
-      order: ['low','high'],
-      labels: { 'low':'Low owned', 'high':'High owned' },
-    },
-    {
-      title: 'Stack size',
-      key: 'stackSize',
-      order: ['3man','4man','5man'],
-      labels: { '3man':'3-man', '4man':'4-man', '5man':'5-man' },
-    },
-    {
-      title: 'Bring-back',
-      key: 'bringback',
-      order: ['yes','no'],
-      labels: { 'yes':'Yes', 'no':'No' },
-    },
-    {
-      title: 'Projection source',
-      key: 'proj',
-      order: ['SplashPlay','Stokastic'],
-      labels: { 'SplashPlay':'SplashPlay', 'Stokastic':'Stokastic' },
-    },
-    {
-      title: 'By site',
-      key: 'site',
-      order: ['DK','FD'],
-      labels: { 'DK':'DK', 'FD':'FD' },
-    },
-    {
-      title: 'GPP vs Cash ROI',
-      key: '_contestClass', // computed below
-      order: ['GPP','Cash'],
-      labels: { 'GPP': 'GPP (all)', 'Cash': 'Cash (all)' },
-    },
-    {
-      title: 'Cash — by format',
-      key: 'ctype',
-      order: ['Cash 50/50','Cash Double-Up','H2H','3-Max','5-Max','20-Max'],
-      labels: {},
-    },
-    {
-      title: 'GPP — by format',
-      key: 'ctype',
-      order: ['GPP'],
-      labels: {},
-    },
-  ];
-
-  // Inject computed _contestClass field for GPP vs Cash card
-  slates.forEach(s => {
-    s._contestClass = s.ctype
-      ? (s.ctype === 'GPP' ? 'GPP' : s.ctype.startsWith('Cash') || ['H2H','3-Max','5-Max','20-Max'].includes(s.ctype) ? 'Cash' : 'GPP')
-      : null;
-  });
-
-  function isCashContest(s) {
-    return s.ctype && (s.ctype.startsWith('Cash') || ['H2H','3-Max','5-Max','20-Max'].includes(s.ctype));
-  }
-
-  function bucketsFor(bk) {
+  // ── Breakdown tables ──────────────────────────────────────────────────────
+  function bucket(keyFn) {
     const map = {};
-    slates.forEach(s => {
-      const val = s[bk.key] || 'Unknown';
-      if (val === 'Unknown' && bk.key === '_contestClass') return; // skip unclassified
-      if (!map[val]) map[val] = { n: 0, invested: 0, winnings: 0, cashes: 0, cashTotal: 0 };
-      map[val].n++;
-      map[val].invested += s.invested || 0;
-      if (s.hasResults) {
-        map[val].winnings += s.winnings || 0;
-        // Track win rate for both cash contests and GPP (any lineup that cashed)
-        map[val].cashTotal++;
-        if (s.cashed === 'Y') map[val].cashes++;
-      }
+    all.forEach(e => {
+      const k = keyFn(e) || 'Unknown';
+      if (!map[k]) map[k] = { n: 0, invested: 0, win: 0, cashes: 0 };
+      map[k].n++;
+      map[k].invested += e.invested || 0;
+      map[k].win      += e.win      || 0;
+      if (e.cashed === 'Y') map[k].cashes++;
     });
     return map;
   }
 
-  function renderBreakdownCard(bk) {
-    const map = bucketsFor(bk);
-    const keys = bk.order
-      ? bk.order.filter(k => map[k])
-      : Object.keys(map).sort();
+  function breakdownCard(title, map, order) {
+    const keys = order ? order.filter(k => map[k]) : Object.keys(map).sort();
     if (!keys.length) return '';
     const rows = keys.map(k => {
       const d   = map[k];
-      const pl  = +(d.winnings - d.invested).toFixed(2);
+      const pl  = +(d.win - d.invested).toFixed(2);
       const roi = d.invested > 0 ? (pl / d.invested * 100).toFixed(1) + '%' : '—';
-      const cashRateStr = d.cashTotal > 0
-        ? `${Math.round(d.cashes / d.cashTotal * 100)}%`
-        : '—';
-      const label = bk.labels[k] || k;
+      const wr  = d.n > 0 ? Math.round(d.cashes / d.n * 100) + '%' : '—';
       return `<tr>
-        <td>${label}</td>
+        <td>${k}</td>
         <td style="text-align:right;color:var(--gray-500)">${d.n}</td>
         <td style="text-align:right;color:var(--gray-500)">$${d.invested.toFixed(2)}</td>
         <td style="text-align:right" class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}$${Math.abs(pl).toFixed(2)}</td>
         <td style="text-align:right" class="${pl >= 0 ? 'pos' : 'neg'}">${roi}</td>
-        <td style="text-align:right;color:var(--gray-500)">${cashRateStr}</td>
+        <td style="text-align:right;color:var(--gray-500)">${wr}</td>
       </tr>`;
     }).join('');
     return `<div class="breakdown-card">
-      <h3>${bk.title}</h3>
+      <h3>${title}</h3>
       <table class="bd-table">
-        <thead><tr><th></th><th>N</th><th>Invested</th><th>P/L</th><th>ROI</th><th>Cash%</th></tr></thead>
+        <thead><tr><th></th><th>N</th><th>Invested</th><th>P/L</th><th>ROI</th><th>Win%</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
   }
 
-  g('breakdown-grid').innerHTML = breakdowns.map(renderBreakdownCard).filter(Boolean).join('') ||
-    '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1">Log more lineups to see breakdowns.</p>';
+  const clsMap  = bucket(e => e.cls);
+  const siteMap = bucket(e => e.site);
+  const typeMap = bucket(e => {
+    // Group cash types, show GPP sub-types too
+    return e.ctype || e.cls || 'Unknown';
+  });
+
+  // GPP vs Cash — show both overall metrics + cash-specific win rate target note
+  const gppVsCash = breakdownCard('GPP vs Cash', clsMap, ['GPP', 'Cash']);
+  const bySite    = breakdownCard('By site', siteMap, ['DK', 'FD']);
+  const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Multiplier','Cash — Other']);
+
+  g('breakdown-grid').innerHTML = [gppVsCash, bySite, byType].filter(Boolean).join('') ||
+    '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1;padding:1rem">Import results to see breakdowns.</p>';
 }
 
 // ── History ───────────────────────────────────────────────────────────────────
 function renderHistory() {
-  const sf = gv('hist-site'), tf = gv('hist-type'), rf = gv('hist-result');
-  let data = [...slates];
-  if (sf) data = data.filter(s => s.site === sf);
-  if (tf) data = data.filter(s => s.ctype === tf);
-  if (rf === 'pending') data = data.filter(s => !s.hasResults);
-  else if (rf === 'Y')  data = data.filter(s => s.cashed === 'Y');
-  else if (rf === 'N')  data = data.filter(s => s.hasResults && s.cashed === 'N');
+  const sf = gv('hist-site'), cf = gv('hist-class'), rf = gv('hist-cashed');
+  let data = [...entries];
+  if (sf) data = data.filter(e => e.site   === sf);
+  if (cf) data = data.filter(e => e.cls    === cf);
+  if (rf) data = data.filter(e => e.cashed === rf);
 
   if (!data.length) {
-    g('hist-table').innerHTML = '<div class="empty"><i class="ti ti-database-off"></i>No lineups yet</div>';
+    g('hist-table').innerHTML = '<div class="empty"><i class="ti ti-database-off"></i>No entries yet — import a results CSV to get started.</div>';
     return;
   }
 
-  const rows = data.map(s => `<tr>
-    <td>${s.date}</td>
-    <td><span class="badge ${(s.site||'').toLowerCase()}">${s.site||'—'}</span></td>
-    <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="${s.contest}">${s.contest}</td>
-    <td><span class="badge ${s.ctype&&s.ctype.startsWith('Cash')?'cash':'gpp'}">${s.ctype||'—'}</span></td>
-    <td>$${(s.fee||0).toFixed(2)}</td>
-    <td>${s.sp||'—'}</td>
-    <td>${[s.stackOwn,s.stackSize].filter(Boolean).join(' ')||'—'}</td>
-    <td>${s.proj||'—'}</td>
-    <td>${s.hasResults?(s.score!=null?s.score.toFixed(1):'—'):'<span style="color:var(--gray-400);font-size:11px">pending</span>'}</td>
-    <td>${s.hasResults?(s.cashed||'—'):'—'}</td>
-    <td>${s.hasResults?`<span class="${(s.pl||0)>=0?'pos':'neg'}">${(s.pl||0)>=0?'+':''}$${Math.abs(s.pl||0).toFixed(2)}</span>`:'—'}</td>
-    <td><button class="btn danger" style="padding:4px 8px;font-size:11px" onclick="deleteLineup(${s.id})"><i class="ti ti-trash"></i></button></td>
+  const rows = data.map(e => `<tr>
+    <td>${e.date || '—'}</td>
+    <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '—'}</span></td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
+    <td><span class="badge ${e.cls === 'Cash' ? 'cash' : 'gpp'}">${e.cls || '—'}</span></td>
+    <td>$${(e.fee||0).toFixed(2)}</td>
+    <td>${e.pts != null ? e.pts.toFixed(1) : '—'}</td>
+    <td>${e.rank || '—'}</td>
+    <td>${e.cashed || '—'}</td>
+    <td class="${(e.pl||0) >= 0 ? 'pos' : 'neg'}">${(e.pl||0) >= 0 ? '+' : ''}$${Math.abs(e.pl||0).toFixed(2)}</td>
+    <td><button class="btn danger" style="padding:4px 8px;font-size:11px" onclick="deleteEntry('${e.id}')"><i class="ti ti-trash"></i></button></td>
   </tr>`).join('');
 
   g('hist-table').innerHTML = `<table>
     <thead><tr>
-      <th>Date</th><th>Site</th><th>Contest</th><th>Type</th><th>Fee</th>
-      <th>SP own</th><th>Stack</th><th>Proj</th><th>Score</th><th>Cash</th><th>P/L</th><th></th>
+      <th>Date</th><th>Site</th><th>Contest</th><th>Class</th>
+      <th>Fee</th><th>Score</th><th>Rank</th><th>Cash</th><th>P/L</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 }
 
-function deleteLineup(id) {
-  if (!confirm('Delete this lineup?')) return;
-  slates = slates.filter(s => s.id !== id);
-  persistSlates(); renderAll(); renderPendingSelect();
+function deleteEntry(id) {
+  if (!confirm('Remove this entry?')) return;
+  entries = entries.filter(e => String(e.id) !== String(id));
+  persist(); renderAll();
 }
 
 // ── Export CSV ────────────────────────────────────────────────────────────────
 function exportCSV() {
-  const h = ['Date','Site','Slate Type','Contest','Contest Type','Fee','Max Entries',
-    'SP Ownership','Stack Ownership','Stack Size','Bring-Back','Proj Source','Note',
-    'Score','Finish','Field Size','Cashed','Winnings','P/L'];
-  const rows = slates.map(s => [
-    s.date,s.site,s.slateType,s.contest,s.ctype,s.fee,s.maxEntries,
-    s.sp,s.stackOwn,s.stackSize,s.bringback,s.proj,s.note,
-    s.score,s.finish,s.field,s.cashed,s.winnings,s.pl,
+  if (!entries.length) { alert('No entries to export.'); return; }
+  const h = ['Date','Site','Contest','Class','Contest Type','Fee','Score','Rank','Field Size','Cashed','Winnings','P/L'];
+  const rows = entries.map(e => [
+    e.date, e.site, e.contest, e.cls, e.ctype, e.fee,
+    e.pts, e.rank, e.field, e.cashed, e.win, e.pl,
   ].map(v => v == null ? '' : `"${String(v).replace(/"/g,'""')}"`));
   const csv = [h.join(','), ...rows.map(r => r.join(','))].join('\n');
   const a = document.createElement('a');
@@ -645,39 +507,5 @@ function exportCSV() {
   a.download = `mlb_dfs_${todayISO()}.csv`;
   a.click();
 }
-
-// ── Checklist ─────────────────────────────────────────────────────────────────
-const CHECKLIST = [
-  'Pull SplashPlay pitcher + batter projections for slate',
-  'Open Stokastic — check projected ownership + top stacks tool',
-  'Compare SP projection between SplashPlay and Stokastic — flag divergences >1.5 pts',
-  'Identify primary stack: top-4 implied total team with Stokastic stack edge score',
-  'Identify secondary stack: mid-tier implied total, low proj ownership (<12%)',
-  'Pick bring-back hitter from opposing team vs your SP',
-  'Check late lineup news and scratches within 30 min of lock',
-  'Confirm contest type — cash lineup ≠ GPP lineup, never enter same lineup in both',
-  'Log each lineup in the app immediately after lock',
-];
-
-function renderChecklist() {
-  let checked = {};
-  try { checked = JSON.parse(localStorage.getItem(CHECK_KEY) || '{}'); } catch {}
-  g('checklist').innerHTML = CHECKLIST.map((item, i) =>
-    `<li class="${checked[i]?'done':''}" onclick="toggleCheck(${i})">
-      <div class="check-box">${checked[i]?'<i class="ti ti-check"></i>':''}</div>
-      <span class="step-num">${String(i+1).padStart(2,'0')}</span>
-      <span>${item}</span>
-    </li>`).join('');
-}
-
-function toggleCheck(i) {
-  let checked = {};
-  try { checked = JSON.parse(localStorage.getItem(CHECK_KEY) || '{}'); } catch {}
-  checked[i] = !checked[i];
-  localStorage.setItem(CHECK_KEY, JSON.stringify(checked));
-  renderChecklist();
-}
-
-function resetChecklist() { localStorage.removeItem(CHECK_KEY); renderChecklist(); }
 
 function renderAll() { renderDashboard(); renderHistory(); }

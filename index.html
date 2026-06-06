@@ -17,133 +17,36 @@
 
   <div class="container">
     <nav class="nav">
-      <button class="tab active" onclick="showTab('log',this)"><i class="ti ti-plus"></i> Log lineup</button>
-      <button class="tab" onclick="showTab('import',this)"><i class="ti ti-upload"></i> Import results</button>
-      <button class="tab" onclick="showTab('results',this)"><i class="ti ti-trophy"></i> Manual results</button>
+      <button class="tab active" onclick="showTab('import',this)"><i class="ti ti-upload"></i> Import results</button>
       <button class="tab" onclick="showTab('dashboard',this)"><i class="ti ti-chart-bar"></i> Dashboard</button>
       <button class="tab" onclick="showTab('history',this)"><i class="ti ti-list"></i> History</button>
-      <button class="tab" onclick="showTab('checklist',this)"><i class="ti ti-checklist"></i> Pre-slate</button>
     </nav>
 
-    <!-- ── LOG ── -->
-    <div id="tab-log" class="section active">
-      <div id="log-alert"></div>
-
-      <div class="card">
-        <div class="carry-bar" id="carry-bar" style="display:none">
-          <span id="carry-label"></span>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-sm" onclick="applyCarry()"><i class="ti ti-copy"></i> Carry contest info</button>
-            <button class="btn btn-sm" onclick="dismissCarry()">Dismiss</button>
-          </div>
-        </div>
-
-        <div class="divider">Contest info</div>
-        <div class="form-grid four">
-          <div class="field"><label>Date</label><input type="date" id="f-date"></div>
-          <div class="field"><label>Site</label>
-            <select id="f-site" onchange="onSiteChange()">
-              <option value="">—</option><option>DK</option><option>FD</option>
-            </select>
-          </div>
-          <div class="field"><label>Slate type</label>
-            <select id="f-slate">
-              <option value="">—</option><option>Main</option><option>Turbo</option><option>Showdown</option>
-            </select>
-          </div>
-          <div class="field"><label>Max entries</label><input type="number" id="f-maxent" placeholder="150" min="1"></div>
-        </div>
-        <div class="form-grid three" style="margin-top:12px">
-          <div class="field"><label>Contest name</label><input type="text" id="f-contest" placeholder="e.g. $5 Baller"></div>
-          <div class="field"><label>Contest type</label>
-            <select id="f-ctype">
-              <option value="">—</option><option>GPP</option><option>Cash 50/50</option><option>Cash Double-Up</option><option>H2H</option><option>3-Max</option><option>5-Max</option><option>20-Max</option>
-            </select>
-          </div>
-          <div class="field"><label>Entry fee ($)</label><input type="number" id="f-fee" min="0" step="0.25" placeholder="5"></div>
-        </div>
-
-        <div class="divider">Lineup construction</div>
-
-        <div class="flag-group" id="fg-sp-dk">
-          <div class="flag-label">Pitcher ownership <span class="flag-site-hint">(DK — 2 pitchers)</span></div>
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="sp" data-value="low-low"   onclick="setFlag('sp','low-low',this)">Low / Low</button>
-            <button type="button" class="flag-btn" data-group="sp" data-value="low-high"  onclick="setFlag('sp','low-high',this)">Low / High</button>
-            <button type="button" class="flag-btn" data-group="sp" data-value="high-high" onclick="setFlag('sp','high-high',this)">High / High</button>
-          </div>
-        </div>
-        <div class="flag-group" id="fg-sp-fd" style="display:none">
-          <div class="flag-label">Pitcher ownership <span class="flag-site-hint">(FD — 1 pitcher)</span></div>
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="sp" data-value="low"  onclick="setFlag('sp','low',this)">Low owned</button>
-            <button type="button" class="flag-btn" data-group="sp" data-value="high" onclick="setFlag('sp','high',this)">High owned</button>
-          </div>
-        </div>
-
-        <div class="flag-group" style="margin-top:14px">
-          <div class="flag-label">Stack ownership</div>
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="stackOwn" data-value="low"  onclick="setFlag('stackOwn','low',this)">Low owned</button>
-            <button type="button" class="flag-btn" data-group="stackOwn" data-value="high" onclick="setFlag('stackOwn','high',this)">High owned</button>
-          </div>
-        </div>
-
-        <div class="flag-group" style="margin-top:14px">
-          <div class="flag-label">Stack size</div>
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="stackSize" data-value="3man" onclick="setFlag('stackSize','3man',this)">3-man</button>
-            <button type="button" class="flag-btn" data-group="stackSize" data-value="4man" onclick="setFlag('stackSize','4man',this)">4-man</button>
-            <button type="button" class="flag-btn" data-group="stackSize" data-value="5man" onclick="setFlag('stackSize','5man',this)">5-man</button>
-          </div>
-        </div>
-
-        <div class="flag-group" style="margin-top:14px">
-          <div class="flag-label">Bring-back</div>
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="bringback" data-value="yes" onclick="setFlag('bringback','yes',this)">Yes</button>
-            <button type="button" class="flag-btn" data-group="bringback" data-value="no"  onclick="setFlag('bringback','no',this)">No</button>
-          </div>
-        </div>
-
-        <div class="divider">Projection source</div>
-        <div class="flag-group">
-          <div class="flag-row">
-            <button type="button" class="flag-btn" data-group="proj" data-value="SplashPlay" onclick="setFlag('proj','SplashPlay',this)">SplashPlay</button>
-            <button type="button" class="flag-btn" data-group="proj" data-value="Stokastic"  onclick="setFlag('proj','Stokastic',this)">Stokastic</button>
-          </div>
-        </div>
-
-        <div class="form-grid" style="margin-top:14px">
-          <div class="field"><label>Notes (optional)</label><input type="text" id="f-note" placeholder="Any quick note"></div>
-        </div>
-
-        <div class="btn-row">
-          <button class="btn primary" onclick="saveLineup()"><i class="ti ti-device-floppy"></i> Save lineup</button>
-          <button class="btn" onclick="clearForm()">Clear all</button>
-        </div>
-      </div>
-    </div>
-
     <!-- ── IMPORT ── -->
-    <div id="tab-import" class="section">
+    <div id="tab-import" class="section active">
       <div id="import-alert"></div>
       <div id="import-step1">
         <div class="card">
           <div class="divider">Upload results CSV</div>
           <div class="hint-box" style="margin-bottom:1rem">
-            <strong>DK:</strong> My Contests → Finished → Export (download icon next to contest) &nbsp;·&nbsp;
-            <strong>FD:</strong> My Contests → Past Contests → Download CSV<br>
-            <span style="color:var(--gray-500);font-size:11px;margin-top:4px;display:block">Site is auto-detected from the file. Each row = one lineup entry.</span>
+            <strong>DK:</strong> Account → Contest History → Export &nbsp;·&nbsp;
+            <strong>FD:</strong> My Contests → Past Contests → Download CSV (filter by month)<br>
+            <span style="color:var(--gray-500);font-size:11px;margin-top:4px;display:block">Site is auto-detected. Use the date range to filter full-history exports.</span>
           </div>
+
           <div class="date-filter-row">
-            <div class="field" style="flex:1;min-width:180px">
-              <label>Filter to date <span style="font-weight:400;color:var(--gray-400)">(optional — use with full-history exports)</span></label>
-              <input type="date" id="import-date">
+            <div class="field" style="flex:1;min-width:140px">
+              <label>From date</label>
+              <input type="date" id="import-date-from">
             </div>
-            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=yesterdayISO()">Yesterday</button>
-            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=todayISO()">Today</button>
-            <button class="btn btn-sm" style="align-self:flex-end" onclick="g('import-date').value=''">Clear</button>
+            <div class="field" style="flex:1;min-width:140px">
+              <label>To date</label>
+              <input type="date" id="import-date-to">
+            </div>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="setImportDateRange('yesterday')">Yesterday</button>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="setImportDateRange('today')">Today</button>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="setImportDateRange('week')">Last 7 days</button>
+            <button class="btn btn-sm" style="align-self:flex-end" onclick="setImportDateRange('clear')">Clear</button>
           </div>
 
           <div class="drop-zone" id="drop-zone" onclick="document.getElementById('csv-file').click()">
@@ -152,56 +55,29 @@
             <span>or click to browse</span>
             <input type="file" id="csv-file" accept=".csv" style="display:none" onchange="handleFile(this.files[0])">
           </div>
+
           <div class="import-info">
-            <p class="import-info-title">Imported per lineup row</p>
+            <p class="import-info-title">Imported per lineup</p>
             <div class="import-info-grid">
-              <div><i class="ti ti-check success-icon"></i> Score (pts)</div>
-              <div><i class="ti ti-check success-icon"></i> Finish rank</div>
-              <div><i class="ti ti-check success-icon"></i> Winnings ($)</div>
+              <div><i class="ti ti-check success-icon"></i> Contest name</div>
+              <div><i class="ti ti-check success-icon"></i> GPP vs Cash (auto)</div>
+              <div><i class="ti ti-check success-icon"></i> Score &amp; finish</div>
+              <div><i class="ti ti-check success-icon"></i> Winnings &amp; P/L</div>
               <div><i class="ti ti-check success-icon"></i> Cash Y/N</div>
               <div><i class="ti ti-check success-icon"></i> Field size</div>
-              <div><i class="ti ti-check success-icon"></i> P/L auto-calc</div>
             </div>
           </div>
         </div>
       </div>
+
       <div id="import-step2" style="display:none">
         <div class="card">
           <div class="import-summary" id="import-summary"></div>
-          <div id="match-list"></div>
+          <div id="preview-table"></div>
           <div class="btn-row">
-            <button class="btn success" onclick="confirmImport()"><i class="ti ti-check"></i> Apply matched results</button>
+            <button class="btn primary" onclick="confirmImport()"><i class="ti ti-check"></i> Import all</button>
             <button class="btn" onclick="resetImport()">Start over</button>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── MANUAL RESULTS ── -->
-    <div id="tab-results" class="section">
-      <div id="res-alert"></div>
-      <div class="card">
-        <div class="divider">Select a pending lineup</div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="pendingSelect" style="flex:1;min-width:220px;max-width:400px"><option value="">— choose lineup —</option></select>
-          <button class="btn" onclick="loadPending()">Load</button>
-        </div>
-      </div>
-      <div id="res-form" class="card" style="display:none;margin-top:12px">
-        <div id="res-summary" class="res-summary"></div>
-        <div class="form-grid three">
-          <div class="field"><label>Score (pts)</label><input type="number" id="r-score" step="0.1" placeholder="142.5"></div>
-          <div class="field"><label>Finish (place)</label><input type="number" id="r-finish" placeholder="1823"></div>
-          <div class="field"><label>Winnings ($)</label><input type="number" id="r-win" step="0.01" placeholder="0"></div>
-        </div>
-        <div class="form-grid" style="margin-top:12px">
-          <div class="field"><label>Cashed?</label>
-            <select id="r-cash"><option value="">—</option><option>Y</option><option>N</option></select>
-          </div>
-          <div class="field"><label>Field size (if known)</label><input type="number" id="r-field" placeholder="60000"></div>
-        </div>
-        <div class="btn-row">
-          <button class="btn primary" onclick="saveResults()"><i class="ti ti-check"></i> Save results</button>
         </div>
       </div>
     </div>
@@ -209,7 +85,6 @@
     <!-- ── DASHBOARD ── -->
     <div id="tab-dashboard" class="section">
       <div class="kpi-grid" id="kpi-grid"></div>
-      <div class="dash-section-title">Construction &amp; source ROI breakdown</div>
       <div class="breakdown-grid" id="breakdown-grid"></div>
     </div>
 
@@ -218,21 +93,12 @@
       <div class="history-toolbar">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select id="hist-site" onchange="renderHistory()"><option value="">All sites</option><option>DK</option><option>FD</option></select>
-          <select id="hist-type" onchange="renderHistory()"><option value="">All types</option><option>GPP</option><option>Cash 50/50</option><option>Cash Double-Up</option><option>H2H</option><option>3-Max</option></select>
-          <select id="hist-result" onchange="renderHistory()"><option value="">All results</option><option value="pending">Pending</option><option value="Y">Cashed</option><option value="N">No cash</option></select>
+          <select id="hist-class" onchange="renderHistory()"><option value="">GPP &amp; Cash</option><option value="GPP">GPP</option><option value="Cash">Cash</option></select>
+          <select id="hist-cashed" onchange="renderHistory()"><option value="">All results</option><option value="Y">Cashed</option><option value="N">No cash</option></select>
         </div>
         <button class="btn" onclick="exportCSV()"><i class="ti ti-download"></i> Export CSV</button>
       </div>
       <div class="table-wrap"><div id="hist-table"></div></div>
-    </div>
-
-    <!-- ── CHECKLIST ── -->
-    <div id="tab-checklist" class="section">
-      <div class="checklist-header">
-        <p>Run through before every slate lock.</p>
-        <button class="btn" onclick="resetChecklist()">Reset all</button>
-      </div>
-      <ul class="checklist" id="checklist"></ul>
     </div>
   </div>
 
