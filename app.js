@@ -300,6 +300,10 @@ function handleFile(file) {
 
     const dateFrom = gv('import-date-from');
     const dateTo   = gv('import-date-to');
+    // DEBUG — remove after testing
+    const sampleDates = norm.slice(0,3).map(r=>r.date).join(', ');
+    console.log('DEBUG dateFrom:', dateFrom, 'dateTo:', dateTo, 'norm.length:', norm.length, 'sample dates:', sampleDates);
+    alert('DEBUG\nSite: ' + site + '\nRows after MLB filter: ' + norm.length + '\nFrom: ' + dateFrom + '\nTo: ' + dateTo + '\nSample dates: ' + sampleDates);
     if (dateFrom || dateTo) {
       norm = norm.filter(r => {
         if (!r.date) return false;
