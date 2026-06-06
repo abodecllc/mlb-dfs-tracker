@@ -198,44 +198,6 @@ function setupDrop() {
   dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFile(e.dataTransfer.files[0]); });
 }
 
-function handleFile(file) {
-  if (!file || !file.name.endsWith('.csv')) {
-    showAlert('import-alert', 'Please upload a .csv file.', 'danger'); return;
-  }
-  const reader = new FileReader();
-  reader.onload = e => {
-    const rows = parseCSV(e.target.result);
-    if (!rows.length) { showAlert('import-alert', 'Could not parse CSV.', 'danger'); return; }
-    const site = detectSite(Object.keys(rows[0]));
-    if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
-
-    let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
-    if (!norm.length) { showAlert('import-alert', `No MLB rows found in this file.`, 'danger'); return; }
-
-    // Date range filter
-    const dateFrom = gv('import-date-from');
-    const dateTo   = gv('import-date-to');
-    if (dateFrom || dateTo) {
-      norm = norm.filter(r => {
-        if (!r.date) return false;
-        if (dateFrom && r.date < dateFrom) return false;
-        if (dateTo   && r.date > dateTo)   return false;
-        return true;
-      });
-      if (!norm.length) {
-        showAlert('import-alert', 'No rows found in that date range. Check the filter or clear it.', 'danger'); return;
-      }
-    } else if (norm.length > 50) {
-      const go = confirm(`${norm.length} lineup rows found with no date filter — this looks like a full history export.\n\nUse the date range filter to narrow to a specific slate, or click OK to import all.`);
-      if (!go) return;
-    }
-
-    renderPreview(norm, site);
-  };
-  reader.readAsText(file);
-}
-
-let pendingRows = [];
 
 function renderPreview(rows, site) {
   pendingRows = rows;
@@ -317,9 +279,6 @@ function confirmImport() {
 // Site isn't stored on the row — infer from the file being processed
 // We'll tag pendingRows with _site in handleFile
 function detectSiteFromRow(r) { return r._site || ''; }
-
-// Patch handleFile to tag site on norm rows
-const _origHandleFile = handleFile;
 
 function handleFile(file) {
   if (!file || !file.name.endsWith('.csv')) {
