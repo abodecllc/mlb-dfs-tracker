@@ -110,10 +110,14 @@ function stripDKSuffix(name) {
 }
 
 function parseDKDate(str) {
-  const m = (str || '').match(/^(\d+)\/(\d+)\/(\d+)/);
-  if (!m) return null;
-  const [, mo, d, y] = m;
-  return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  if (!str) return null;
+  // Format: "2025-05-05 19:15:00" or "2025-05-05T19:15:00"
+  const iso = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  // Format: "6/1/2026 19:10"
+  const us = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (us) return `${us[3]}-${us[1].padStart(2,'0')}-${us[2].padStart(2,'0')}`;
+  return null;
 }
 
 function parseFDDate(str) {
