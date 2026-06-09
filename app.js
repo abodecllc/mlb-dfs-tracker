@@ -44,32 +44,32 @@ function showTab(name, el) {
 // ── Contest classifier ────────────────────────────────────────────────────────
 // Returns 'Cash' or 'GPP' based on contest name and optional FD opponent field
 function classifyContest(name, opponent) {
-  // FD provides Opponent field: "Tournament" = GPP, otherwise cash
-  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash';
-
   const n = (name || '').toLowerCase();
 
-  const cashPatterns = [
-    /double.?up/i, /50.?50/i, /fifty.?fifty/i,
-    /head.?to.?head/i, /\bh2h\b/i, /\bduel\b/i,
-    /multiplier/i, /\bsatellite\b/i,
-    /\b(2|3|4|5|6|7|8|9|10).?x\b/i,   // 2x, 3x multiplier
-    /\bsolo shot\b/i,                   // DK Solo Shot = Double Up
-  ];
+  // FD: Opponent field is reliable — anything not "Tournament" is cash
+  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash';
 
-  for (const p of cashPatterns) {
-    if (p.test(n)) return 'Cash';
-  }
+  // DK: Only true cash contest is Double Up (top ~44-46% pay out)
+  // Everything else — Solo Shot, Chin Music, Pickoff, Four-Seamer,
+  // Hot Corner, Base Hit, Strike Three, Triple Up, Quintuple Up,
+  // Satellites, Winner Take All — are all GPP formats
+  if (/double.?up/i.test(n)) return 'Cash';
+
+  // FD cash names
+  if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n)) return 'Cash';
+  if (/head.?to.?head/i.test(n) || /\bh2h\b/i.test(n) || /\bduel\b/i.test(n)) return 'Cash';
+  if (/\bbean ball\b/i.test(n)) return 'Cash'; // FD Double Up
+
   return 'GPP';
 }
 
-// Finer-grained contest type label within the class
+// Finer-grained contest type label
 function contestType(name, opponent) {
   const n = (name || '').toLowerCase();
-  if (/double.?up/i.test(n) || /solo shot/i.test(n)) return 'Double Up';
-  if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n))  return '50/50';
+  if (/double.?up/i.test(n)) return 'Double Up';
+  if (/\bbean ball\b/i.test(n)) return 'Double Up'; // FD
+  if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n)) return '50/50';
   if (/head.?to.?head/i.test(n) || /\bh2h\b/i.test(n) || /\bduel\b/i.test(n)) return 'H2H';
-  if (/multiplier/i.test(n) || /\d.?x\b/i.test(n))   return 'Multiplier';
   if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash — Other';
   return 'GPP';
 }
@@ -476,3 +476,391 @@ function exportCSV() {
 }
 
 function renderAll() { renderDashboard(); renderHistory(); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CASH LINEUP BUILDER
+// ══════════════════════════════════════════════════════════════════════════════
+
+const luData = { sal: null, splash: null, stok: null };
+let luPool = [];
+let luLineup = [];
+
+function handleLuFile(type, file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if (!rows.length) { showAlert('lineup-alert', `Could not parse ${type} file.`, 'danger'); return; }
+    luData[type] = rows;
+    const slot = g(`slot-${type}`);
+    const status = g(`status-${type}`);
+    slot.classList.add('uploaded');
+    status.textContent = `✓ ${rows.length} rows loaded`;
+    // Show settings card once all three uploaded
+    if (luData.sal && luData.splash && luData.stok) {
+      g('lu-settings-card').style.display = 'block';
+      showAlert('lineup-alert', 'All files loaded — configure settings and build.', 'success');
+      // Auto-detect if pitcher self-conflict likely
+      autoDetectExclusions();
+    }
+  };
+  reader.readAsText(file);
+}
+
+function autoDetectExclusions() {
+  // Pre-populate exclude teams based on SPs in salary file
+  // (user can override)
+}
+
+function parseLuSalaries(rows) {
+  const out = {};
+  rows.forEach(r => {
+    const name = (r['name'] || r['Name'] || '').trim();
+    const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
+    const pos  = (r['position'] || r['Position'] || r['roster position'] || r['Roster Position'] || '').trim();
+    const team = (r['teamabbrev'] || r['TeamAbbrev'] || r['team abbrev'] || r['Team Abbrev'] || '').trim();
+    const id   = (r['id'] || r['ID'] || r['playerid'] || r['PlayerID'] || r['player id'] || '').trim();
+    if (name && sal) out[name] = { sal, pos, team, id };
+  });
+  return out;
+}
+
+function parseLuSplash(rows) {
+  const out = {};
+  rows.forEach(r => {
+    // "Player Name and Id", "Player Name", "Projection"
+    const name = (r['player name'] || r['Player Name'] || r['name'] || '').trim();
+    const proj = parseFloat(r['projection'] || r['Projection'] || r['fpts'] || 0) || 0;
+    if (name) out[name] = proj;
+  });
+  return out;
+}
+
+function parseLuStok(rows) {
+  const out = {};
+  rows.forEach(r => {
+    // Data Hub: Player, Team, Pos, Roster Pos, Fpts, Salary...
+    const name = (r['player'] || r['Player'] || r['name'] || '').trim();
+    const proj = parseFloat(r['fpts'] || r['Fpts'] || r['projection'] || r['Projection'] || 0) || 0;
+    const team = (r['team'] || r['Team'] || '').trim();
+    const pos  = (r['roster pos'] || r['Roster Pos'] || r['position'] || r['Position'] || '').trim();
+    if (name) out[name] = { proj, team, pos };
+  });
+  return out;
+}
+
+function buildLineup() {
+  if (!luData.sal || !luData.splash || !luData.stok) {
+    showAlert('lineup-alert', 'Please upload all three files first.', 'info'); return;
+  }
+
+  const CAP       = parseInt(gv('lu-cap')) || 50000;
+  const MAX_DIFF  = parseFloat(g('lu-max-diff').value) || 2.5;
+  const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+
+  const locks = [
+    gv('lu-lock-sp1'), gv('lu-lock-sp2'),
+    gv('lu-lock-h1'),  gv('lu-lock-h2'),
+  ].filter(Boolean).map(s => s.trim().toLowerCase());
+
+  // Parse all three sources
+  const salMap   = parseLuSalaries(luData.sal);
+  const splashMap = parseLuSplash(luData.splash);
+  const stokMap  = parseLuStok(luData.stok);
+
+  // Build consensus pool
+  luPool = [];
+  const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
+
+  allNames.forEach(name => {
+    const salData  = salMap[name];
+    if (!salData) return;
+    const sp = splashMap[name] || 0;
+    const stEntry = stokMap[name];
+    const st = stEntry ? stEntry.proj : 0;
+    const team = salData.team || (stEntry ? stEntry.team : '');
+    const pos  = salData.pos  || (stEntry ? stEntry.pos  : '');
+
+    if (sp === 0 || st === 0) return;
+    if (salData.sal === 0) return;
+
+    const diff      = Math.abs(sp - st);
+    const consensus = (sp + st) / 2;
+
+    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus });
+  });
+
+  // Determine which teams our SPs face (to exclude those hitters)
+  // Find SP names from locks or highest-projected SPs
+  const spPool = luPool.filter(p => p.pos && p.pos.includes('SP'));
+  const lockedSPNames = [gv('lu-lock-sp1'), gv('lu-lock-sp2')].filter(Boolean).map(s=>s.trim().toLowerCase());
+  const ourSPs = spPool.filter(p => lockedSPNames.includes(p.name.toLowerCase()));
+  // For each SP, find opposing team from salary file context
+  // We'll rely on user-entered exclusions for now — but also auto-exclude SP's own team hitters from opposition
+  // Since we don't have matchup data, trust user exclusions
+
+  // Apply exclusions: user-specified teams
+  const excludeTeams = new Set(excludeRaw);
+
+  // Filter pool: no excluded teams, consensus diff within threshold
+  const eligiblePool = luPool.filter(p => {
+    if (excludeTeams.has(p.team.toUpperCase())) return false;
+    return true;
+  });
+
+  // Separate consensus-only pool (diff <= MAX_DIFF) vs all eligible
+  const consensusPool = eligiblePool.filter(p => p.diff <= MAX_DIFF);
+
+  // Position pools — DK slots: P, P, C, 1B, 2B, 3B, SS, OF, OF, OF
+  const posPool = (pos, useConsensus = true) => {
+    const pool = useConsensus ? consensusPool : eligiblePool;
+    return pool.filter(p => p.pos && p.pos.includes(pos))
+               .sort((a, b) => b.consensus - a.consensus);
+  };
+
+  // Identify locked players
+  const findPlayer = (nameInput, pos) => {
+    if (!nameInput) return null;
+    const nl = nameInput.trim().toLowerCase();
+    return luPool.find(p => p.name.toLowerCase().includes(nl) && (!pos || p.pos.includes(pos)));
+  };
+
+  const lockedSP1 = findPlayer(gv('lu-lock-sp1'), 'SP');
+  const lockedSP2 = findPlayer(gv('lu-lock-sp2'), 'SP');
+  const lockedH1  = findPlayer(gv('lu-lock-h1'));
+  const lockedH2  = findPlayer(gv('lu-lock-h2'));
+  const locked = [lockedSP1, lockedSP2, lockedH1, lockedH2].filter(Boolean);
+  const lockedNames = new Set(locked.map(p => p.name));
+  const lockedSal = locked.reduce((a, p) => a + p.sal, 0);
+  const remaining = CAP - lockedSal;
+
+  // Determine what slots still need to be filled
+  const filledPositions = { SP: 0, C: 0, '1B': 0, '2B': 0, '3B': 0, SS: 0, OF: 0 };
+  locked.forEach(p => {
+    if (p.pos.includes('SP')) filledPositions.SP++;
+    else if (p.pos.includes('C')) filledPositions.C++;
+    else if (p.pos.includes('1B')) filledPositions['1B']++;
+    else if (p.pos.includes('2B')) filledPositions['2B']++;
+    else if (p.pos.includes('3B')) filledPositions['3B']++;
+    else if (p.pos.includes('SS')) filledPositions.SS++;
+    else if (p.pos.includes('OF')) filledPositions.OF++;
+  });
+
+  const slotsNeeded = {
+    SP: 2 - filledPositions.SP,
+    C:  1 - filledPositions.C,
+    '1B': 1 - filledPositions['1B'],
+    '2B': 1 - filledPositions['2B'],
+    '3B': 1 - filledPositions['3B'],
+    SS: 1 - filledPositions.SS,
+    OF: 3 - filledPositions.OF,
+  };
+
+  // Greedy fill: for each needed slot pick best consensus player within budget
+  // Use brute-force for small positions, greedy for OF
+  let filledSlots = [...locked];
+  let usedNames = new Set(lockedNames);
+  let budgetLeft = remaining;
+  const warnings = [];
+
+  const fillSlot = (pos, count) => {
+    const candidates = posPool(pos).filter(p => !usedNames.has(p.name) && p.sal <= budgetLeft);
+    // If not enough consensus candidates, fall back to eligible pool with any diff
+    const fallback = posPool(pos, false).filter(p => !usedNames.has(p.name) && p.sal <= budgetLeft);
+    for (let i = 0; i < count; i++) {
+      const pool = candidates.length > 0 ? candidates : fallback;
+      if (!pool.length) { warnings.push(`Could not find eligible ${pos} within budget.`); return; }
+      const pick = pool.shift();
+      filledSlots.push(pick);
+      usedNames.add(pick.name);
+      budgetLeft -= pick.sal;
+      if (pick.diff > MAX_DIFF) warnings.push(`${pick.name} added outside consensus threshold (diff: ${pick.diff.toFixed(1)} pts) — no better option available.`);
+    }
+  };
+
+  // Fill in order: SPs first (most expensive), then premium hitters, then value spots
+  const fillOrder = ['SP','C','OF','1B','2B','3B','SS'];
+  fillOrder.forEach(pos => {
+    if (slotsNeeded[pos] > 0) fillSlot(pos, slotsNeeded[pos]);
+  });
+
+  luLineup = filledSlots;
+
+  // Sort display order
+  const posOrder = { SP: 0, C: 1, '1B': 2, '2B': 3, '3B': 4, SS: 5, OF: 6 };
+  luLineup.sort((a, b) => {
+    const pa = Object.keys(posOrder).find(k => a.pos.includes(k));
+    const pb = Object.keys(posOrder).find(k => b.pos.includes(k));
+    return (posOrder[pa] || 9) - (posOrder[pb] || 9);
+  });
+
+  renderLineupResult(warnings, CAP, MAX_DIFF);
+  g('lu-result').style.display = 'block';
+  renderPool();
+}
+
+function renderLineupResult(warnings, CAP, MAX_DIFF) {
+  const totalSal  = luLineup.reduce((a, p) => a + p.sal, 0);
+  const totalSP   = luLineup.reduce((a, p) => a + p.sp, 0);
+  const totalST   = luLineup.reduce((a, p) => a + p.st, 0);
+  const totalCons = luLineup.reduce((a, p) => a + p.consensus, 0);
+  const under = CAP - totalSal;
+
+  const posLabel = p => {
+    if (p.pos.includes('SP')) return 'P';
+    if (p.pos.includes('OF')) return 'OF';
+    if (p.pos.includes('SS')) return 'SS';
+    if (p.pos.includes('3B')) return '3B';
+    if (p.pos.includes('2B')) return '2B';
+    if (p.pos.includes('1B')) return '1B';
+    if (p.pos.includes('C'))  return 'C';
+    return p.pos;
+  };
+
+  const rows = luLineup.map(p => {
+    const diffFlag = p.diff > MAX_DIFF
+      ? `<span style="color:var(--red);font-size:10px"> ⚠ diff ${p.diff.toFixed(1)}</span>` : '';
+    return `<tr>
+      <td><strong>${posLabel(p)}</strong></td>
+      <td>${p.name}${diffFlag}</td>
+      <td>${p.team}</td>
+      <td style="text-align:right">$${p.sal.toLocaleString()}</td>
+      <td style="text-align:right">${p.sp.toFixed(2)}</td>
+      <td style="text-align:right">${p.st.toFixed(2)}</td>
+      <td style="text-align:right"><strong>${p.consensus.toFixed(2)}</strong></td>
+      <td style="text-align:right;color:var(--gray-500)">${p.diff.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  const capColor = under >= 0 ? 'var(--green)' : 'var(--red)';
+  const capLabel = under >= 0 ? `$${under.toLocaleString()} under cap` : `$${Math.abs(under).toLocaleString()} OVER CAP`;
+
+  g('lu-lineup-table').innerHTML = `
+    <table class="bd-table" style="font-size:13px">
+      <thead><tr>
+        <th style="text-align:left">Pos</th>
+        <th style="text-align:left">Player</th>
+        <th style="text-align:left">Team</th>
+        <th>Salary</th>
+        <th>SplashPlay</th>
+        <th>Stokastic</th>
+        <th>Consensus</th>
+        <th>Diff</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="font-weight:600;border-top:2px solid var(--gray-200)">
+          <td colspan="3">TOTAL</td>
+          <td style="text-align:right">$${totalSal.toLocaleString()}</td>
+          <td style="text-align:right">${totalSP.toFixed(2)}</td>
+          <td style="text-align:right">${totalST.toFixed(2)}</td>
+          <td style="text-align:right">${totalCons.toFixed(2)}</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td colspan="8" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td>
+        </tr>
+      </tfoot>
+    </table>`;
+
+  const warnHTML = warnings.length
+    ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
+    : '<div style="font-size:12px;color:var(--gray-500)">No warnings — all players within consensus threshold.</div>';
+  g('lu-warnings').innerHTML = warnHTML;
+
+  // Show export button
+  const existingBtn = g('lu-export-btn');
+  if (existingBtn) existingBtn.remove();
+  const btn = document.createElement('button');
+  btn.id = 'lu-export-btn';
+  btn.className = 'btn primary';
+  btn.style.marginTop = '1rem';
+  btn.innerHTML = '<i class="ti ti-download"></i> Export for DK upload';
+  btn.onclick = exportLineupDK;
+  g('lu-lineup-table').after(btn);
+}
+
+function renderPool() {
+  if (!luPool.length) return;
+  const posFilter  = gv('lu-pool-pos');
+  const sortBy     = gv('lu-pool-sort') || 'consensus';
+  const MAX_DIFF   = parseFloat(g('lu-max-diff').value) || 2.5;
+  const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+  const excludeTeams = new Set(excludeRaw);
+
+  let data = [...luPool].filter(p => !excludeTeams.has(p.team.toUpperCase()));
+  if (posFilter) data = data.filter(p => p.pos && p.pos.includes(posFilter));
+  data.sort((a, b) => {
+    if (sortBy === 'diff')    return a.diff - b.diff;
+    if (sortBy === 'salary')  return b.sal - a.sal;
+    return b.consensus - a.consensus;
+  });
+
+  const inLineup = new Set(luLineup.map(p => p.name));
+
+  const rows = data.slice(0, 60).map(p => {
+    const highlight = inLineup.has(p.name) ? 'background:var(--green-light)' : '';
+    const flagStyle = p.diff > MAX_DIFF ? 'color:var(--red)' : 'color:var(--green)';
+    return `<tr style="${highlight}">
+      <td>${p.pos}</td>
+      <td>${p.name}${inLineup.has(p.name) ? ' <span style="font-size:10px;color:var(--green);font-weight:600">✓ IN</span>' : ''}</td>
+      <td>${p.team}</td>
+      <td style="text-align:right">$${p.sal.toLocaleString()}</td>
+      <td style="text-align:right">${p.sp.toFixed(2)}</td>
+      <td style="text-align:right">${p.st.toFixed(2)}</td>
+      <td style="text-align:right"><strong>${p.consensus.toFixed(2)}</strong></td>
+      <td style="text-align:right;${flagStyle}">${p.diff.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  g('lu-pool-table').innerHTML = `<table>
+    <thead><tr>
+      <th>Pos</th><th>Player</th><th>Team</th><th>Salary</th>
+      <th>SplashPlay</th><th>Stokastic</th><th>Consensus</th><th>Diff</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function exportLineupDK() {
+  if (!luLineup.length) return;
+  const salMap = parseLuSalaries(luData.sal);
+
+  // DK slot order: P, P, C, 1B, 2B, 3B, SS, OF, OF, OF
+  const slotOrder = ['SP','SP','C','1B','2B','3B','SS','OF','OF','OF'];
+  const sorted = [...luLineup];
+  const posOrder = { SP:0, C:1, '1B':2, '2B':3, '3B':4, SS:5, OF:6 };
+  sorted.sort((a,b) => {
+    const pa = ['SP','C','1B','2B','3B','SS','OF'].find(k => a.pos.includes(k));
+    const pb = ['SP','C','1B','2B','3B','SS','OF'].find(k => b.pos.includes(k));
+    return (posOrder[pa]||9) - (posOrder[pb]||9);
+  });
+
+  const header = 'P,P,C,1B,2B,3B,SS,OF,OF,OF';
+  const cells = sorted.map(p => {
+    const salEntry = salMap[p.name];
+    const id = salEntry ? salEntry.id : '';
+    return id ? `${p.name} (${id})` : p.name;
+  });
+  const csv = header + '\n' + cells.join(',') + ',';
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `DK_cash_lineup_${todayISO()}.csv`;
+  a.click();
+}
+
+function resetLineupBuilder() {
+  luData.sal = luData.splash = luData.stok = null;
+  luPool = []; luLineup = [];
+  ['sal','splash','stok'].forEach(t => {
+    const slot = g(`slot-${t}`); if(slot) slot.classList.remove('uploaded');
+    const status = g(`status-${t}`); if(status) status.textContent = 'Not uploaded';
+    const file = g(`file-${t}`); if(file) file.value = '';
+  });
+  g('lu-settings-card').style.display = 'none';
+  g('lu-result').style.display = 'none';
+  ['lu-lock-sp1','lu-lock-sp2','lu-lock-h1','lu-lock-h2','lu-exclude-teams'].forEach(id => {
+    const el = g(id); if(el) el.value = '';
+  });
+}

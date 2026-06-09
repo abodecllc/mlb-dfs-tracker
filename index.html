@@ -18,6 +18,7 @@
   <div class="container">
     <nav class="nav">
       <button class="tab active" onclick="showTab('import',this)"><i class="ti ti-upload"></i> Import results</button>
+      <button class="tab" onclick="showTab('lineup',this)"><i class="ti ti-layout-list"></i> Cash lineup</button>
       <button class="tab" onclick="showTab('dashboard',this)"><i class="ti ti-chart-bar"></i> Dashboard</button>
       <button class="tab" onclick="showTab('history',this)"><i class="ti ti-list"></i> History</button>
     </nav>
@@ -100,6 +101,102 @@
       </div>
       <div class="table-wrap"><div id="hist-table"></div></div>
     </div>
+    <!-- ── CASH LINEUP BUILDER ── -->
+    <div id="tab-lineup" class="section">
+      <div id="lineup-alert"></div>
+      <div class="card">
+        <div class="divider">Upload files</div>
+        <div class="lu-upload-grid">
+          <div class="lu-upload-slot" id="slot-sal">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">DK Salaries CSV</div>
+            <div class="lu-slot-hint">Download from DK lineup builder</div>
+            <div class="lu-slot-status" id="status-sal">Not uploaded</div>
+            <input type="file" id="file-sal" accept=".csv" onchange="handleLuFile('sal',this.files[0])">
+          </div>
+          <div class="lu-upload-slot" id="slot-splash">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">SplashPlay Projections</div>
+            <div class="lu-slot-hint">Export from SplashPlay</div>
+            <div class="lu-slot-status" id="status-splash">Not uploaded</div>
+            <input type="file" id="file-splash" accept=".csv" onchange="handleLuFile('splash',this.files[0])">
+          </div>
+          <div class="lu-upload-slot" id="slot-stok">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">Stokastic Projections</div>
+            <div class="lu-slot-hint">Data Hub export from Stokastic</div>
+            <div class="lu-slot-status" id="status-stok">Not uploaded</div>
+            <input type="file" id="file-stok" accept=".csv" onchange="handleLuFile('stok',this.files[0])">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="lu-settings-card" style="display:none">
+        <div class="divider">Settings</div>
+        <div class="form-grid three">
+          <div class="field">
+            <label>Max consensus disagreement (pts)</label>
+            <input type="number" id="lu-max-diff" value="2.5" step="0.5" min="0.5" max="10">
+          </div>
+          <div class="field">
+            <label>Salary cap ($)</label>
+            <input type="number" id="lu-cap" value="50000" step="100">
+          </div>
+          <div class="field">
+            <label>Exclude teams (comma separated)</label>
+            <input type="text" id="lu-exclude-teams" placeholder="e.g. CHC, NYY">
+          </div>
+        </div>
+        <div class="divider">Lock players (optional)</div>
+        <div class="form-grid" style="margin-top:0">
+          <div class="field">
+            <label>Lock SP1</label>
+            <input type="text" id="lu-lock-sp1" placeholder="e.g. Chase Burns">
+          </div>
+          <div class="field">
+            <label>Lock SP2</label>
+            <input type="text" id="lu-lock-sp2" placeholder="e.g. Kai-Wei Teng">
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label>Lock hitter 1</label>
+            <input type="text" id="lu-lock-h1" placeholder="Player name">
+          </div>
+          <div class="field">
+            <label>Lock hitter 2</label>
+            <input type="text" id="lu-lock-h2" placeholder="Player name">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" onclick="buildLineup()"><i class="ti ti-wand"></i> Build optimal cash lineup</button>
+          <button class="btn" onclick="resetLineupBuilder()">Reset</button>
+        </div>
+      </div>
+
+      <div id="lu-result" style="display:none">
+        <div class="card">
+          <div class="divider">Optimal cash lineup</div>
+          <div id="lu-lineup-table"></div>
+          <div id="lu-warnings" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <div class="divider">Full consensus pool</div>
+          <div class="history-toolbar" style="margin-bottom:.75rem">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <select id="lu-pool-pos" onchange="renderPool()"><option value="">All positions</option><option>SP</option><option>C</option><option>1B</option><option>2B</option><option>3B</option><option>SS</option><option>OF</option></select>
+              <select id="lu-pool-sort" onchange="renderPool()">
+                <option value="consensus">Sort: Consensus pts</option>
+                <option value="diff">Sort: Disagreement</option>
+                <option value="salary">Sort: Salary</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap"><div id="lu-pool-table"></div></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script src="app.js"></script>
