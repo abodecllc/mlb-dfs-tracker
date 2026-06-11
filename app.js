@@ -540,9 +540,11 @@ function parseLuSalaries(rows) {
   rows.forEach(r => {
     const name = (r['name'] || r['Name'] || '').trim();
     const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
-    const pos  = (r['position'] || r['Position'] || r['roster position'] || r['Roster Position'] || '').trim();
+    const rawPos  = (r['position'] || r['Position'] || '').trim();
     const team = (r['teamabbrev'] || r['TeamAbbrev'] || r['team abbrev'] || r['Team Abbrev'] || '').trim();
     const id   = (r['id'] || r['ID'] || r['playerid'] || r['PlayerID'] || r['player id'] || '').trim();
+    // Normalize: SP/RP both become SP for optimizer; keep multi-position as-is
+    const pos = (rawPos === 'RP') ? 'SP' : rawPos;
     if (name && sal) out[name] = { sal, pos, team, id };
   });
   return out;
@@ -668,11 +670,14 @@ function buildLineup() {
   // Separate consensus-only pool (diff <= MAX_DIFF) vs all eligible
   const consensusPool = eligiblePool.filter(p => p.diff <= MAX_DIFF);
 
-  // Position pools
+  // Position pools — match on primary position only to avoid multi-pos confusion
   const posPool = (pos, useConsensus = true) => {
     const pool = useConsensus ? consensusPool : eligiblePool;
-    return pool.filter(p => p.pos && p.pos.includes(pos))
-               .sort((a, b) => b.consensus - a.consensus);
+    return pool.filter(p => {
+      if (!p.pos) return false;
+      const primary = p.pos.split('/')[0].trim();
+      return primary === pos;
+    }).sort((a, b) => b.consensus - a.consensus);
   };
 
   const lockedSP1 = findPlayer(gv('lu-lock-sp1'), 'SP');
@@ -685,15 +690,17 @@ function buildLineup() {
   const remaining = CAP - lockedSal;
 
   // Determine what slots still need to be filled
+  // Use primary position (first listed) to avoid double-counting multi-position players
   const filledPositions = { SP: 0, C: 0, '1B': 0, '2B': 0, '3B': 0, SS: 0, OF: 0 };
   locked.forEach(p => {
-    if (p.pos.includes('SP')) filledPositions.SP++;
-    else if (p.pos.includes('C')) filledPositions.C++;
-    else if (p.pos.includes('1B')) filledPositions['1B']++;
-    else if (p.pos.includes('2B')) filledPositions['2B']++;
-    else if (p.pos.includes('3B')) filledPositions['3B']++;
-    else if (p.pos.includes('SS')) filledPositions.SS++;
-    else if (p.pos.includes('OF')) filledPositions.OF++;
+    const primary = p.pos.split('/')[0].trim();
+    if (primary === 'SP') filledPositions.SP++;
+    else if (primary === 'C') filledPositions.C++;
+    else if (primary === '1B') filledPositions['1B']++;
+    else if (primary === '2B') filledPositions['2B']++;
+    else if (primary === '3B') filledPositions['3B']++;
+    else if (primary === 'SS') filledPositions.SS++;
+    else if (primary === 'OF') filledPositions.OF++;
   });
 
   const slotsNeeded = {
@@ -715,7 +722,7 @@ function buildLineup() {
   // Minimum salary needed per remaining slot (use cheapest available at each pos)
   function minCostPerPos(pos, usedNames) {
     const pool = [...consensusPool, ...eligiblePool].filter(p =>
-      p.pos.includes(pos) && !usedNames.has(p.name)
+      p.pos && p.pos.split('/')[0].trim() === pos && !usedNames.has(p.name)
     );
     if (!pool.length) return 0;
     return Math.min(...pool.map(p => p.sal));
@@ -723,13 +730,13 @@ function buildLineup() {
 
   // Candidates for each needed slot, consensus first then fallback
   function getCandidates(pos, usedNames, budgetRemaining) {
+    const primaryMatch = p => p.pos && p.pos.split('/')[0].trim() === pos;
     const consensus = consensusPool.filter(p =>
-      p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
+      primaryMatch(p) && !usedNames.has(p.name) && p.sal <= budgetRemaining
     ).sort((a,b) => b.consensus - a.consensus);
     if (consensus.length) return consensus;
-    // Fallback: eligible pool outside consensus threshold
     return eligiblePool.filter(p =>
-      p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
+      primaryMatch(p) && !usedNames.has(p.name) && p.sal <= budgetRemaining
     ).sort((a,b) => b.consensus - a.consensus);
   }
 
@@ -787,7 +794,7 @@ function buildLineup() {
       }
       const pos = slotsToFill[slotIdx];
       const candidates = anyPool.filter(p =>
-        p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetLeft
+        p.pos && p.pos.split('/')[0].trim() === pos && !usedNames.has(p.name) && p.sal <= budgetLeft
       ).sort((a,b) => b.consensus - a.consensus).slice(0, 10);
       for (const p of candidates) {
         usedNames.add(p.name);
