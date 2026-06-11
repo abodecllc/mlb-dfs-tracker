@@ -1,4 +1,4 @@
-// ── Storage ───────────────────────────────────────────────────────────────────
+// - Storage -
 const STORE_KEY = 'mlb_dfs_entries';
 let entries = [];
 
@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderAll();
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// - Helpers -
 function g(id)  { return document.getElementById(id); }
 function gv(id) { const e = g(id); return e ? e.value.trim() : ''; }
 
@@ -41,18 +41,18 @@ function showTab(name, el) {
   if (name === 'history')   renderHistory();
 }
 
-// ── Contest classifier ────────────────────────────────────────────────────────
+// - Contest classifier -
 // Returns 'Cash' or 'GPP' based on contest name and optional FD opponent field
 function classifyContest(name, opponent) {
   const n = (name || '').toLowerCase();
 
-  // FD: Opponent field is reliable — anything not "Tournament" is cash
+  // FD: Opponent field is reliable - anything not "Tournament" is cash
   if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash';
 
   // DK: Only true cash contest is Double Up (top ~44-46% pay out)
-  // Everything else — Solo Shot, Chin Music, Pickoff, Four-Seamer,
+  // Everything else - Solo Shot, Chin Music, Pickoff, Four-Seamer,
   // Hot Corner, Base Hit, Strike Three, Triple Up, Quintuple Up,
-  // Satellites, Winner Take All — are all GPP formats
+  // Satellites, Winner Take All - are all GPP formats
   if (/double.?up/i.test(n)) return 'Cash';
 
   // FD cash names
@@ -70,11 +70,11 @@ function contestType(name, opponent) {
   if (/\bbean ball\b/i.test(n)) return 'Double Up'; // FD
   if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n)) return '50/50';
   if (/head.?to.?head/i.test(n) || /\bh2h\b/i.test(n) || /\bduel\b/i.test(n)) return 'H2H';
-  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash — Other';
+  if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash - Other';
   return 'GPP';
 }
 
-// ── CSV parsing ───────────────────────────────────────────────────────────────
+// - CSV parsing -
 function parseCSV(text) {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -176,7 +176,7 @@ function normalizeFD(rows) {
     .filter(r => r.contest);
 }
 
-// ── Date filter helpers ───────────────────────────────────────────────────────
+// - Date filter helpers -
 function setImportDateRange(preset) {
   const from = g('import-date-from'), to = g('import-date-to');
   if (!from || !to) return;
@@ -190,7 +190,7 @@ function setImportDateRange(preset) {
   }
 }
 
-// ── Import flow ───────────────────────────────────────────────────────────────
+// - Import flow -
 function setupDrop() {
   const dz = g('drop-zone'); if (!dz) return;
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
@@ -210,29 +210,29 @@ function renderPreview(rows, site) {
   const totalFee  = rows.reduce((a, r) => a + r.fee, 0);
 
   g('import-summary').innerHTML = `
-    <h3>${site} — ${rows.length} lineup${rows.length !== 1 ? 's' : ''} ready to import</h3>
+    <h3>${site} - ${rows.length} lineup${rows.length !== 1 ? 's' : ''} ready to import</h3>
     <div class="summary-row"><span>GPP lineups</span><strong>${gppCount}</strong></div>
     <div class="summary-row"><span>Cash lineups</span><strong>${cashCount}</strong></div>
     <div class="summary-row"><span>Total entry fees</span><strong>$${totalFee.toFixed(2)}</strong></div>
     <div class="summary-row"><span>Total winnings</span><strong>$${totalWin.toFixed(2)}</strong></div>
     <div class="summary-row"><span>Net P/L</span><strong class="${totalWin - totalFee >= 0 ? 'pos' : 'neg'}">${totalWin - totalFee >= 0 ? '+' : ''}$${(totalWin - totalFee).toFixed(2)}</strong></div>`;
 
-  // Preview table — first 15 rows
+  // Preview table - first 15 rows
   const preview = rows.slice(0, 15);
-  const moreRows = rows.length > 15 ? `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);font-size:11px;padding:8px">… and ${rows.length - 15} more</td></tr>` : '';
+  const moreRows = rows.length > 15 ? `<tr><td colspan="7" style="text-align:center;color:var(--gray-400);font-size:11px;padding:8px">- and ${rows.length - 15} more</td></tr>` : '';
   g('preview-table').innerHTML = `
     <div class="table-wrap" style="margin:1rem 0">
       <table>
         <thead><tr><th>Date</th><th>Contest</th><th>Class</th><th>Score</th><th>Rank</th><th>Fee</th><th>Winnings</th></tr></thead>
         <tbody>
           ${preview.map(r => `<tr>
-            <td>${r.date || '—'}</td>
+            <td>${r.date || '-'}</td>
             <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${r.contest}">${r.contest}</td>
             <td><span class="badge ${r.cls === 'Cash' ? 'cash' : 'gpp'}">${r.cls}</span></td>
             <td>${r.pts.toFixed(1)}</td>
-            <td>${r.rank || '—'}</td>
+            <td>${r.rank || '-'}</td>
             <td>$${r.fee.toFixed(2)}</td>
-            <td class="${r.win > 0 ? 'pos' : ''}">${r.win > 0 ? '$' + r.win.toFixed(2) : '—'}</td>
+            <td class="${r.win > 0 ? 'pos' : ''}">${r.win > 0 ? '$' + r.win.toFixed(2) : '-'}</td>
           </tr>`).join('')}
           ${moreRows}
         </tbody>
@@ -276,7 +276,7 @@ function confirmImport() {
   resetImport();
 }
 
-// Site isn't stored on the row — infer from the file being processed
+// Site isn't stored on the row - infer from the file being processed
 // We'll tag pendingRows with _site in handleFile
 function detectSiteFromRow(r) { return r._site || ''; }
 
@@ -289,7 +289,7 @@ function handleFile(file) {
     const rows = parseCSV(e.target.result);
     if (!rows.length) { showAlert('import-alert', 'Could not parse CSV.', 'danger'); return; }
     const site = detectSite(Object.keys(rows[0]));
-    if (!site) { showAlert('import-alert', 'Could not detect site — make sure this is a DK or FD export.', 'danger'); return; }
+    if (!site) { showAlert('import-alert', 'Could not detect site - make sure this is a DK or FD export.', 'danger'); return; }
 
     let norm = site === 'FD' ? normalizeFD(rows) : normalizeDK(rows);
     if (!norm.length) { showAlert('import-alert', 'No MLB rows found in this file.', 'danger'); return; }
@@ -300,10 +300,7 @@ function handleFile(file) {
 
     const dateFrom = gv('import-date-from');
     const dateTo   = gv('import-date-to');
-    // DEBUG — remove after testing
-    const sampleDates = norm.slice(0,3).map(r=>r.date).join(', ');
-    console.log('DEBUG dateFrom:', dateFrom, 'dateTo:', dateTo, 'norm.length:', norm.length, 'sample dates:', sampleDates);
-    alert('DEBUG\nSite: ' + site + '\nRows after MLB filter: ' + norm.length + '\nFrom: ' + dateFrom + '\nTo: ' + dateTo + '\nSample dates: ' + sampleDates);
+
     if (dateFrom || dateTo) {
       norm = norm.filter(r => {
         if (!r.date) return false;
@@ -317,7 +314,7 @@ function handleFile(file) {
         showAlert('import-alert', 'No rows found in that date range. Check the filter or clear it.', 'danger'); return;
       }
     } else if (norm.length > 50) {
-      const go = confirm(`${norm.length} lineup rows found with no date filter — this looks like a full history export.\n\nUse the date range filter to narrow to a specific slate, or click OK to import all.`);
+      const go = confirm(`${norm.length} lineup rows found with no date filter - this looks like a full history export.\n\nUse the date range filter to narrow to a specific slate, or click OK to import all.`);
       if (!go) return;
     }
 
@@ -333,7 +330,7 @@ function resetImport() {
   g('csv-file').value = '';
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
+// - Dashboard -
 function renderDashboard() {
   const all      = entries;
   const invested = all.reduce((a, e) => a + (e.invested || 0), 0);
@@ -353,9 +350,9 @@ function renderDashboard() {
                        pl >= 0 ? 'pos' : 'neg',      ''],
     ['Overall ROI',    (roi * 100).toFixed(1) + '%', roi >= 0 ? 'pos' : 'neg', ''],
     ['Cash win rate',
-      cashRate !== null ? (cashRate * 100).toFixed(0) + '%' : '—',
+      cashRate !== null ? (cashRate * 100).toFixed(0) + '%' : '-',
       cashRate !== null ? (cashRate >= 0.52 ? 'pos' : 'neg') : '',
-      cashRate !== null ? 'target ≥52%' : 'no cash lineups yet'],
+      cashRate !== null ? 'target -52%' : 'no cash lineups yet'],
   ].map(([label, val, cls, sub]) =>
     `<div class="kpi">
       <div class="kpi-label">${label}</div>
@@ -363,7 +360,7 @@ function renderDashboard() {
       ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
     </div>`).join('');
 
-  // ── Breakdown tables ──────────────────────────────────────────────────────
+  // - Breakdown tables -
   function bucket(keyFn) {
     const map = {};
     all.forEach(e => {
@@ -383,8 +380,8 @@ function renderDashboard() {
     const rows = keys.map(k => {
       const d   = map[k];
       const pl  = +(d.win - d.invested).toFixed(2);
-      const roi = d.invested > 0 ? (pl / d.invested * 100).toFixed(1) + '%' : '—';
-      const wr  = d.n > 0 ? Math.round(d.cashes / d.n * 100) + '%' : '—';
+      const roi = d.invested > 0 ? (pl / d.invested * 100).toFixed(1) + '%' : '-';
+      const wr  = d.n > 0 ? Math.round(d.cashes / d.n * 100) + '%' : '-';
       return `<tr>
         <td>${k}</td>
         <td style="text-align:right;color:var(--gray-500)">${d.n}</td>
@@ -410,16 +407,16 @@ function renderDashboard() {
     return e.ctype || e.cls || 'Unknown';
   });
 
-  // GPP vs Cash — show both overall metrics + cash-specific win rate target note
+  // GPP vs Cash - show both overall metrics + cash-specific win rate target note
   const gppVsCash = breakdownCard('GPP vs Cash', clsMap, ['GPP', 'Cash']);
   const bySite    = breakdownCard('By site', siteMap, ['DK', 'FD']);
-  const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Multiplier','Cash — Other']);
+  const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Multiplier','Cash - Other']);
 
   g('breakdown-grid').innerHTML = [gppVsCash, bySite, byType].filter(Boolean).join('') ||
     '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1;padding:1rem">Import results to see breakdowns.</p>';
 }
 
-// ── History ───────────────────────────────────────────────────────────────────
+// - History -
 function renderHistory() {
   const sf = gv('hist-site'), cf = gv('hist-class'), rf = gv('hist-cashed');
   let data = [...entries];
@@ -428,19 +425,19 @@ function renderHistory() {
   if (rf) data = data.filter(e => e.cashed === rf);
 
   if (!data.length) {
-    g('hist-table').innerHTML = '<div class="empty"><i class="ti ti-database-off"></i>No entries yet — import a results CSV to get started.</div>';
+    g('hist-table').innerHTML = '<div class="empty"><i class="ti ti-database-off"></i>No entries yet - import a results CSV to get started.</div>';
     return;
   }
 
   const rows = data.map(e => `<tr>
-    <td>${e.date || '—'}</td>
-    <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '—'}</span></td>
+    <td>${e.date || '-'}</td>
+    <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '-'}</span></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
-    <td><span class="badge ${e.cls === 'Cash' ? 'cash' : 'gpp'}">${e.cls || '—'}</span></td>
+    <td><span class="badge ${e.cls === 'Cash' ? 'cash' : 'gpp'}">${e.cls || '-'}</span></td>
     <td>$${(e.fee||0).toFixed(2)}</td>
-    <td>${e.pts != null ? e.pts.toFixed(1) : '—'}</td>
-    <td>${e.rank || '—'}</td>
-    <td>${e.cashed || '—'}</td>
+    <td>${e.pts != null ? e.pts.toFixed(1) : '-'}</td>
+    <td>${e.rank || '-'}</td>
+    <td>${e.cashed || '-'}</td>
     <td class="${(e.pl||0) >= 0 ? 'pos' : 'neg'}">${(e.pl||0) >= 0 ? '+' : ''}$${Math.abs(e.pl||0).toFixed(2)}</td>
     <td><button class="btn danger" style="padding:4px 8px;font-size:11px" onclick="deleteEntry('${e.id}')"><i class="ti ti-trash"></i></button></td>
   </tr>`).join('');
@@ -460,7 +457,7 @@ function deleteEntry(id) {
   persist(); renderAll();
 }
 
-// ── Export CSV ────────────────────────────────────────────────────────────────
+// - Export CSV -
 function exportCSV() {
   if (!entries.length) { alert('No entries to export.'); return; }
   const h = ['Date','Site','Contest','Class','Contest Type','Fee','Score','Rank','Field Size','Cashed','Winnings','P/L'];
@@ -477,9 +474,9 @@ function exportCSV() {
 
 function renderAll() { renderDashboard(); renderHistory(); }
 
-// ══════════════════════════════════════════════════════════════════════════════
+// -
 // CASH LINEUP BUILDER
-// ══════════════════════════════════════════════════════════════════════════════
+// -
 
 const luData = { sal: null, splash: null, stok: null };
 let luPool = [];
@@ -495,11 +492,11 @@ function handleLuFile(type, file) {
     const slot = g(`slot-${type}`);
     const status = g(`status-${type}`);
     slot.classList.add('uploaded');
-    status.textContent = `✓ ${rows.length} rows loaded`;
+    status.textContent = `- ${rows.length} rows loaded`;
     // Show settings card once all three uploaded
     if (luData.sal && luData.splash && luData.stok) {
       g('lu-settings-card').style.display = 'block';
-      showAlert('lineup-alert', 'All files loaded — configure settings and build.', 'success');
+      showAlert('lineup-alert', 'All files loaded - configure settings and build.', 'success');
       // Auto-detect if pitcher self-conflict likely
       autoDetectExclusions();
     }
@@ -534,7 +531,7 @@ function validateLockField(input, pos) {
     return false;
   }
   input.classList.remove('field-error');
-  input.title = '✓ ' + found.name;
+  input.title = '- ' + found.name;
   return true;
 }
 
@@ -608,7 +605,7 @@ function buildLineup() {
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus });
   });
 
-  // ── Validate lock fields before proceeding ───────────────────────────────
+  // - Validate lock fields before proceeding -
   const lockFields = [
     { id: 'lu-lock-sp1', label: 'Lock SP1', pos: 'SP' },
     { id: 'lu-lock-sp2', label: 'Lock SP2', pos: 'SP' },
@@ -645,7 +642,7 @@ function buildLineup() {
       const suggestions = suggestPlayer(val, f.pos);
       const hint = suggestions.length
         ? ` Did you mean: ${suggestions.join(', ')}?`
-        : ' No match found in today's slate.';
+        : ' No match found in today\'s slate.';
       showAlert('lineup-alert', `${f.label}: "${val}" not found.${hint}`, 'danger');
       validationFailed = true;
     } else {
@@ -709,7 +706,7 @@ function buildLineup() {
     OF: 3 - filledPositions.OF,
   };
 
-  // ── Salary-aware optimizer ───────────────────────────────────────────────
+  // - Salary-aware optimizer -
   // For each needed slot, build a candidate list (consensus pool first, fallback to eligible)
   // Then use a branch-and-bound style search: try combinations keeping track of
   // remaining salary headroom per unfilled slot to avoid dead ends.
@@ -780,7 +777,7 @@ function buildLineup() {
 
   if (!bestCombo) {
     // Last resort: relax consensus threshold entirely and try again
-    warnings.push('Could not find a valid lineup within budget using consensus pool — using best available players regardless of source disagreement.');
+    warnings.push('Could not find a valid lineup within budget using consensus pool - using best available players regardless of source disagreement.');
     const anyPool = [...luPool].filter(p => !new Set(lockedNames).has(p.name) && !excludeTeams.has(p.team.toUpperCase()));
     function optimizeFallback(slotIdx, chosen, usedNames, budgetLeft) {
       if (slotIdx === slotsToFill.length) {
@@ -804,13 +801,13 @@ function buildLineup() {
   }
 
   if (!bestCombo) {
-    showAlert('lineup-alert', 'Could not build a valid lineup — check salary cap, excluded teams, or locked players.', 'danger');
+    showAlert('lineup-alert', 'Could not build a valid lineup - check salary cap, excluded teams, or locked players.', 'danger');
     return;
   }
 
   // Flag any players outside consensus threshold
   bestCombo.forEach(p => {
-    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts) — no better option was available.`);
+    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts) - no better option was available.`);
   });
 
   luLineup = [...locked, ...bestCombo];
@@ -848,7 +845,7 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
 
   const rows = luLineup.map(p => {
     const diffFlag = p.diff > MAX_DIFF
-      ? `<span style="color:var(--red);font-size:10px"> ⚠ diff ${p.diff.toFixed(1)}</span>` : '';
+      ? `<span style="color:var(--red);font-size:10px"> - diff ${p.diff.toFixed(1)}</span>` : '';
     return `<tr>
       <td><strong>${posLabel(p)}</strong></td>
       <td>${p.name}${diffFlag}</td>
@@ -894,7 +891,7 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
 
   const warnHTML = warnings.length
     ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
-    : '<div style="font-size:12px;color:var(--gray-500)">No warnings — all players within consensus threshold.</div>';
+    : '<div style="font-size:12px;color:var(--gray-500)">No warnings - all players within consensus threshold.</div>';
   g('lu-warnings').innerHTML = warnHTML;
 
   // Show export button
@@ -932,7 +929,7 @@ function renderPool() {
     const flagStyle = p.diff > MAX_DIFF ? 'color:var(--red)' : 'color:var(--green)';
     return `<tr style="${highlight}">
       <td>${p.pos}</td>
-      <td>${p.name}${inLineup.has(p.name) ? ' <span style="font-size:10px;color:var(--green);font-weight:600">✓ IN</span>' : ''}</td>
+      <td>${p.name}${inLineup.has(p.name) ? ' <span style="font-size:10px;color:var(--green);font-weight:600">- IN</span>' : ''}</td>
       <td>${p.team}</td>
       <td style="text-align:right">$${p.sal.toLocaleString()}</td>
       <td style="text-align:right">${p.sp.toFixed(2)}</td>
