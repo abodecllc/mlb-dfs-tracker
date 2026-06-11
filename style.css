@@ -283,3 +283,10 @@ tr:hover td { background: var(--gray-50); }
 .lu-upload-slot input[type="file"] {
   position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
 }
+
+/* ── Lock field validation ────────────────────────────────────────────────── */
+.field-error {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(192,57,43,.12) !important;
+  background: var(--red-light) !important;
+}

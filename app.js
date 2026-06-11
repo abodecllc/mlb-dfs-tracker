@@ -508,8 +508,34 @@ function handleLuFile(type, file) {
 }
 
 function autoDetectExclusions() {
-  // Pre-populate exclude teams based on SPs in salary file
-  // (user can override)
+  // Wire up blur validation on lock fields once pool is built
+  ['lu-lock-sp1','lu-lock-sp2','lu-lock-h1','lu-lock-h2'].forEach(id => {
+    const el = g(id); if (!el) return;
+    el.oninput = () => validateLockField(el, id.includes('sp') ? 'SP' : null);
+  });
+}
+
+function validateLockField(input, pos) {
+  const val = input.value.trim();
+  if (!val) { input.classList.remove('field-error'); return true; }
+  if (!luPool.length) return true; // pool not built yet, skip
+  const found = luPool.find(p =>
+    p.name.toLowerCase().includes(val.toLowerCase()) && (!pos || p.pos.includes(pos))
+  );
+  if (!found) {
+    input.classList.add('field-error');
+    // Show suggestions in title tooltip
+    const words = val.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+    const pool = pos ? luPool.filter(p => p.pos.includes(pos)) : luPool;
+    const suggestions = pool
+      .map(p => ({ name: p.name, m: words.filter(w => p.name.toLowerCase().includes(w)).length }))
+      .filter(x => x.m > 0).sort((a,b) => b.m - a.m).slice(0,3).map(x => x.name);
+    input.title = suggestions.length ? 'Did you mean: ' + suggestions.join(', ') + '?' : 'No match found';
+    return false;
+  }
+  input.classList.remove('field-error');
+  input.title = '✓ ' + found.name;
+  return true;
 }
 
 function parseLuSalaries(rows) {
@@ -558,15 +584,10 @@ function buildLineup() {
   const MAX_DIFF  = parseFloat(g('lu-max-diff').value) || 2.5;
   const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
 
-  const locks = [
-    gv('lu-lock-sp1'), gv('lu-lock-sp2'),
-    gv('lu-lock-h1'),  gv('lu-lock-h2'),
-  ].filter(Boolean).map(s => s.trim().toLowerCase());
-
-  // Parse all three sources
-  const salMap   = parseLuSalaries(luData.sal);
+  // Parse all three sources first so we can validate locks
+  const salMap    = parseLuSalaries(luData.sal);
   const splashMap = parseLuSplash(luData.splash);
-  const stokMap  = parseLuStok(luData.stok);
+  const stokMap   = parseLuStok(luData.stok);
 
   // Build consensus pool
   luPool = [];
@@ -580,24 +601,63 @@ function buildLineup() {
     const st = stEntry ? stEntry.proj : 0;
     const team = salData.team || (stEntry ? stEntry.team : '');
     const pos  = salData.pos  || (stEntry ? stEntry.pos  : '');
-
     if (sp === 0 || st === 0) return;
     if (salData.sal === 0) return;
-
     const diff      = Math.abs(sp - st);
     const consensus = (sp + st) / 2;
-
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus });
   });
 
-  // Determine which teams our SPs face (to exclude those hitters)
-  // Find SP names from locks or highest-projected SPs
-  const spPool = luPool.filter(p => p.pos && p.pos.includes('SP'));
-  const lockedSPNames = [gv('lu-lock-sp1'), gv('lu-lock-sp2')].filter(Boolean).map(s=>s.trim().toLowerCase());
-  const ourSPs = spPool.filter(p => lockedSPNames.includes(p.name.toLowerCase()));
-  // For each SP, find opposing team from salary file context
-  // We'll rely on user-entered exclusions for now — but also auto-exclude SP's own team hitters from opposition
-  // Since we don't have matchup data, trust user exclusions
+  // ── Validate lock fields before proceeding ───────────────────────────────
+  const lockFields = [
+    { id: 'lu-lock-sp1', label: 'Lock SP1', pos: 'SP' },
+    { id: 'lu-lock-sp2', label: 'Lock SP2', pos: 'SP' },
+    { id: 'lu-lock-h1',  label: 'Lock hitter 1', pos: null },
+    { id: 'lu-lock-h2',  label: 'Lock hitter 2', pos: null },
+  ];
+
+  const findPlayer = (nameInput, pos) => {
+    if (!nameInput) return null;
+    const nl = nameInput.trim().toLowerCase();
+    return luPool.find(p => p.name.toLowerCase().includes(nl) && (!pos || p.pos.includes(pos)));
+  };
+
+  // Fuzzy suggestion: find closest name match by shared words
+  const suggestPlayer = (nameInput, pos) => {
+    const words = nameInput.trim().toLowerCase().split(/\s+/).filter(w => w.length > 1);
+    const candidates = pos ? luPool.filter(p => p.pos.includes(pos)) : luPool;
+    const scored = candidates.map(p => {
+      const pn = p.name.toLowerCase();
+      const matches = words.filter(w => pn.includes(w)).length;
+      return { name: p.name, matches };
+    }).filter(x => x.matches > 0).sort((a,b) => b.matches - a.matches);
+    return scored.slice(0,3).map(x => x.name);
+  };
+
+  let validationFailed = false;
+  lockFields.forEach(f => {
+    const input = g(f.id);
+    const val = input ? input.value.trim() : '';
+    if (!val) { input && input.classList.remove('field-error'); return; }
+    const found = findPlayer(val, f.pos);
+    if (!found) {
+      input.classList.add('field-error');
+      const suggestions = suggestPlayer(val, f.pos);
+      const hint = suggestions.length
+        ? ` Did you mean: ${suggestions.join(', ')}?`
+        : ' No match found in today's slate.';
+      showAlert('lineup-alert', `${f.label}: "${val}" not found.${hint}`, 'danger');
+      validationFailed = true;
+    } else {
+      input.classList.remove('field-error');
+    }
+  });
+  if (validationFailed) return;
+
+  const locks = [
+    gv('lu-lock-sp1'), gv('lu-lock-sp2'),
+    gv('lu-lock-h1'),  gv('lu-lock-h2'),
+  ].filter(Boolean).map(s => s.trim().toLowerCase());
 
   // Apply exclusions: user-specified teams
   const excludeTeams = new Set(excludeRaw);
@@ -611,18 +671,11 @@ function buildLineup() {
   // Separate consensus-only pool (diff <= MAX_DIFF) vs all eligible
   const consensusPool = eligiblePool.filter(p => p.diff <= MAX_DIFF);
 
-  // Position pools — DK slots: P, P, C, 1B, 2B, 3B, SS, OF, OF, OF
+  // Position pools
   const posPool = (pos, useConsensus = true) => {
     const pool = useConsensus ? consensusPool : eligiblePool;
     return pool.filter(p => p.pos && p.pos.includes(pos))
                .sort((a, b) => b.consensus - a.consensus);
-  };
-
-  // Identify locked players
-  const findPlayer = (nameInput, pos) => {
-    if (!nameInput) return null;
-    const nl = nameInput.trim().toLowerCase();
-    return luPool.find(p => p.name.toLowerCase().includes(nl) && (!pos || p.pos.includes(pos)));
   };
 
   const lockedSP1 = findPlayer(gv('lu-lock-sp1'), 'SP');
@@ -656,35 +709,111 @@ function buildLineup() {
     OF: 3 - filledPositions.OF,
   };
 
-  // Greedy fill: for each needed slot pick best consensus player within budget
-  // Use brute-force for small positions, greedy for OF
-  let filledSlots = [...locked];
-  let usedNames = new Set(lockedNames);
-  let budgetLeft = remaining;
+  // ── Salary-aware optimizer ───────────────────────────────────────────────
+  // For each needed slot, build a candidate list (consensus pool first, fallback to eligible)
+  // Then use a branch-and-bound style search: try combinations keeping track of
+  // remaining salary headroom per unfilled slot to avoid dead ends.
   const warnings = [];
 
-  const fillSlot = (pos, count) => {
-    const candidates = posPool(pos).filter(p => !usedNames.has(p.name) && p.sal <= budgetLeft);
-    // If not enough consensus candidates, fall back to eligible pool with any diff
-    const fallback = posPool(pos, false).filter(p => !usedNames.has(p.name) && p.sal <= budgetLeft);
-    for (let i = 0; i < count; i++) {
-      const pool = candidates.length > 0 ? candidates : fallback;
-      if (!pool.length) { warnings.push(`Could not find eligible ${pos} within budget.`); return; }
-      const pick = pool.shift();
-      filledSlots.push(pick);
-      usedNames.add(pick.name);
-      budgetLeft -= pick.sal;
-      if (pick.diff > MAX_DIFF) warnings.push(`${pick.name} added outside consensus threshold (diff: ${pick.diff.toFixed(1)} pts) — no better option available.`);
-    }
-  };
+  // Minimum salary needed per remaining slot (use cheapest available at each pos)
+  function minCostPerPos(pos, usedNames) {
+    const pool = [...consensusPool, ...eligiblePool].filter(p =>
+      p.pos.includes(pos) && !usedNames.has(p.name)
+    );
+    if (!pool.length) return 0;
+    return Math.min(...pool.map(p => p.sal));
+  }
 
-  // Fill in order: SPs first (most expensive), then premium hitters, then value spots
-  const fillOrder = ['SP','C','OF','1B','2B','3B','SS'];
-  fillOrder.forEach(pos => {
-    if (slotsNeeded[pos] > 0) fillSlot(pos, slotsNeeded[pos]);
+  // Candidates for each needed slot, consensus first then fallback
+  function getCandidates(pos, usedNames, budgetRemaining) {
+    const consensus = consensusPool.filter(p =>
+      p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
+    ).sort((a,b) => b.consensus - a.consensus);
+    if (consensus.length) return consensus;
+    // Fallback: eligible pool outside consensus threshold
+    return eligiblePool.filter(p =>
+      p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
+    ).sort((a,b) => b.consensus - a.consensus);
+  }
+
+  // Slots to fill in order (fill expensive/constrained positions first)
+  const slotsToFill = [];
+  Object.entries(slotsNeeded).forEach(([pos, count]) => {
+    for (let i = 0; i < count; i++) slotsToFill.push(pos);
+  });
+  // Sort: fill most constrained positions first (fewest options)
+  slotsToFill.sort((a, b) => {
+    const aOpts = getCandidates(a, lockedNames, remaining).length;
+    const bOpts = getCandidates(b, lockedNames, remaining).length;
+    return aOpts - bOpts;
   });
 
-  luLineup = filledSlots;
+  // Recursive optimizer with budget headroom check
+  let bestTotal = -1;
+  let bestCombo = null;
+
+  function optimize(slotIdx, chosen, usedNames, budgetLeft) {
+    if (slotIdx === slotsToFill.length) {
+      const total = chosen.reduce((a,p) => a + p.consensus, 0);
+      if (total > bestTotal) { bestTotal = total; bestCombo = [...chosen]; }
+      return;
+    }
+    const pos = slotsToFill[slotIdx];
+    // Calculate minimum cost of remaining slots
+    const remainingSlots = slotsToFill.slice(slotIdx + 1);
+    const minRemaining = remainingSlots.reduce((sum, rpos) => {
+      return sum + minCostPerPos(rpos, new Set([...usedNames, ...(chosen.map(p=>p.name))]));
+    }, 0);
+    const candidates = getCandidates(pos, usedNames, budgetLeft - minRemaining);
+    // Try top N candidates to keep runtime manageable
+    const topN = candidates.slice(0, 12);
+    for (const p of topN) {
+      usedNames.add(p.name);
+      chosen.push(p);
+      optimize(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
+      chosen.pop();
+      usedNames.delete(p.name);
+    }
+  }
+
+  optimize(0, [], new Set(lockedNames), remaining);
+
+  if (!bestCombo) {
+    // Last resort: relax consensus threshold entirely and try again
+    warnings.push('Could not find a valid lineup within budget using consensus pool — using best available players regardless of source disagreement.');
+    const anyPool = [...luPool].filter(p => !new Set(lockedNames).has(p.name) && !excludeTeams.has(p.team.toUpperCase()));
+    function optimizeFallback(slotIdx, chosen, usedNames, budgetLeft) {
+      if (slotIdx === slotsToFill.length) {
+        const total = chosen.reduce((a,p) => a + p.consensus, 0);
+        if (total > bestTotal) { bestTotal = total; bestCombo = [...chosen]; }
+        return;
+      }
+      const pos = slotsToFill[slotIdx];
+      const candidates = anyPool.filter(p =>
+        p.pos.includes(pos) && !usedNames.has(p.name) && p.sal <= budgetLeft
+      ).sort((a,b) => b.consensus - a.consensus).slice(0, 10);
+      for (const p of candidates) {
+        usedNames.add(p.name);
+        chosen.push(p);
+        optimizeFallback(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
+        chosen.pop();
+        usedNames.delete(p.name);
+      }
+    }
+    optimizeFallback(0, [], new Set(lockedNames), remaining);
+  }
+
+  if (!bestCombo) {
+    showAlert('lineup-alert', 'Could not build a valid lineup — check salary cap, excluded teams, or locked players.', 'danger');
+    return;
+  }
+
+  // Flag any players outside consensus threshold
+  bestCombo.forEach(p => {
+    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts) — no better option was available.`);
+  });
+
+  luLineup = [...locked, ...bestCombo];
 
   // Sort display order
   const posOrder = { SP: 0, C: 1, '1B': 2, '2B': 3, '3B': 4, SS: 5, OF: 6 };
