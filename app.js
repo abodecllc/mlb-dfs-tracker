@@ -832,12 +832,24 @@ function buildLineup() {
 
   luLineup = [...locked, ...bestCombo];
 
-  // Sort display order
+  // Safety net: count slots and warn if wrong
+  const REQUIRED = { SP: 2, C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 3 };
+  const actualSlots = { SP: 0, C: 0, '1B': 0, '2B': 0, '3B': 0, SS: 0, OF: 0 };
+  luLineup.forEach(p => {
+    const slot = p._slot || p.pos.split('/')[0].trim();
+    if (actualSlots[slot] !== undefined) actualSlots[slot]++;
+  });
+  Object.entries(REQUIRED).forEach(([pos, req]) => {
+    if (actualSlots[pos] !== req)
+      warnings.push(`Slot count issue: ${pos} needs ${req}, got ${actualSlots[pos]}. Set the Slot dropdown for your locked hitters to fix this.`);
+  });
+
+  // Sort display order — use _slot if set to avoid multi-pos sort confusion
   const posOrder = { SP: 0, C: 1, '1B': 2, '2B': 3, '3B': 4, SS: 5, OF: 6 };
   luLineup.sort((a, b) => {
-    const pa = Object.keys(posOrder).find(k => a.pos.includes(k));
-    const pb = Object.keys(posOrder).find(k => b.pos.includes(k));
-    return (posOrder[pa] || 9) - (posOrder[pb] || 9);
+    const sa = a._slot || a.pos.split('/')[0].trim();
+    const sb = b._slot || b.pos.split('/')[0].trim();
+    return (posOrder[sa] ?? 9) - (posOrder[sb] ?? 9);
   });
 
   renderLineupResult(warnings, CAP, MAX_DIFF);
