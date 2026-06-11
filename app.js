@@ -516,8 +516,9 @@ function validateLockField(input, pos) {
   const val = input.value.trim();
   if (!val) { input.classList.remove('field-error'); return true; }
   if (!luPool.length) return true; // pool not built yet, skip
+  // For hitters with slot override, just check name exists in pool
   const found = luPool.find(p =>
-    p.name.toLowerCase().includes(val.toLowerCase()) && (!pos || p.pos.includes(pos))
+    p.name.toLowerCase().includes(val.toLowerCase()) && (!pos || p.pos.split('/').some(s => s.trim() === pos))
   );
   if (!found) {
     input.classList.add('field-error');
@@ -608,11 +609,13 @@ function buildLineup() {
   });
 
   // - Validate lock fields before proceeding -
+  const h1Slot = gv('lu-lock-h1-pos') || null;
+  const h2Slot = gv('lu-lock-h2-pos') || null;
   const lockFields = [
     { id: 'lu-lock-sp1', label: 'Lock SP1', pos: 'SP' },
     { id: 'lu-lock-sp2', label: 'Lock SP2', pos: 'SP' },
-    { id: 'lu-lock-h1',  label: 'Lock hitter 1', pos: null },
-    { id: 'lu-lock-h2',  label: 'Lock hitter 2', pos: null },
+    { id: 'lu-lock-h1',  label: 'Lock hitter 1', pos: h1Slot },
+    { id: 'lu-lock-h2',  label: 'Lock hitter 2', pos: h2Slot },
   ];
 
   const findPlayer = (nameInput, pos) => {
@@ -680,27 +683,37 @@ function buildLineup() {
     }).sort((a, b) => b.consensus - a.consensus);
   };
 
+  // For hitter locks, use user-specified slot if provided — overrides player's primary pos
+  const h1SlotOverride = gv('lu-lock-h1-pos');
+  const h2SlotOverride = gv('lu-lock-h2-pos');
+
   const lockedSP1 = findPlayer(gv('lu-lock-sp1'), 'SP');
   const lockedSP2 = findPlayer(gv('lu-lock-sp2'), 'SP');
   const lockedH1  = findPlayer(gv('lu-lock-h1'));
   const lockedH2  = findPlayer(gv('lu-lock-h2'));
+
+  // Tag each locked player with the slot they're filling
+  if (lockedSP1) lockedSP1._slot = 'SP';
+  if (lockedSP2) lockedSP2._slot = 'SP';
+  if (lockedH1)  lockedH1._slot  = h1SlotOverride || lockedH1.pos.split('/')[0].trim();
+  if (lockedH2)  lockedH2._slot  = h2SlotOverride || lockedH2.pos.split('/')[0].trim();
+
   const locked = [lockedSP1, lockedSP2, lockedH1, lockedH2].filter(Boolean);
   const lockedNames = new Set(locked.map(p => p.name));
   const lockedSal = locked.reduce((a, p) => a + p.sal, 0);
   const remaining = CAP - lockedSal;
 
-  // Determine what slots still need to be filled
-  // Use primary position (first listed) to avoid double-counting multi-position players
+  // Determine what slots still need to be filled using the assigned slot
   const filledPositions = { SP: 0, C: 0, '1B': 0, '2B': 0, '3B': 0, SS: 0, OF: 0 };
   locked.forEach(p => {
-    const primary = p.pos.split('/')[0].trim();
-    if (primary === 'SP') filledPositions.SP++;
-    else if (primary === 'C') filledPositions.C++;
-    else if (primary === '1B') filledPositions['1B']++;
-    else if (primary === '2B') filledPositions['2B']++;
-    else if (primary === '3B') filledPositions['3B']++;
-    else if (primary === 'SS') filledPositions.SS++;
-    else if (primary === 'OF') filledPositions.OF++;
+    const slot = p._slot || p.pos.split('/')[0].trim();
+    if (slot === 'SP') filledPositions.SP++;
+    else if (slot === 'C') filledPositions.C++;
+    else if (slot === '1B') filledPositions['1B']++;
+    else if (slot === '2B') filledPositions['2B']++;
+    else if (slot === '3B') filledPositions['3B']++;
+    else if (slot === 'SS') filledPositions.SS++;
+    else if (slot === 'OF') filledPositions.OF++;
   });
 
   const slotsNeeded = {
