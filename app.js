@@ -776,20 +776,18 @@ function buildLineup() {
       return;
     }
     const pos = slotsToFill[slotIdx];
-    // Calculate minimum cost of remaining slots
+    // Merge usedNames + chosen into one set for all candidate/cost lookups
+    const allUsed = new Set([...usedNames, ...chosen.map(p => p.name)]);
     const remainingSlots = slotsToFill.slice(slotIdx + 1);
     const minRemaining = remainingSlots.reduce((sum, rpos) => {
-      return sum + minCostPerPos(rpos, new Set([...usedNames, ...(chosen.map(p=>p.name))]));
+      return sum + minCostPerPos(rpos, allUsed);
     }, 0);
-    const candidates = getCandidates(pos, usedNames, budgetLeft - minRemaining);
-    // Try top N candidates to keep runtime manageable
+    const candidates = getCandidates(pos, allUsed, budgetLeft - minRemaining);
     const topN = candidates.slice(0, 12);
     for (const p of topN) {
-      usedNames.add(p.name);
       chosen.push(p);
       optimize(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
       chosen.pop();
-      usedNames.delete(p.name);
     }
   }
 
@@ -806,15 +804,14 @@ function buildLineup() {
         return;
       }
       const pos = slotsToFill[slotIdx];
+      const allUsedFb = new Set([...usedNames, ...chosen.map(p => p.name)]);
       const candidates = anyPool.filter(p =>
-        p.pos && p.pos.split('/')[0].trim() === pos && !usedNames.has(p.name) && p.sal <= budgetLeft
+        p.pos && p.pos.split('/')[0].trim() === pos && !allUsedFb.has(p.name) && p.sal <= budgetLeft
       ).sort((a,b) => b.consensus - a.consensus).slice(0, 10);
       for (const p of candidates) {
-        usedNames.add(p.name);
         chosen.push(p);
         optimizeFallback(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
         chosen.pop();
-        usedNames.delete(p.name);
       }
     }
     optimizeFallback(0, [], new Set(lockedNames), remaining);
