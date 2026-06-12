@@ -846,6 +846,13 @@ function buildLineup() {
 
   luLineup = [...locked, ...bestCombo];
 
+  // TEMP DEBUG
+  console.log('slotsNeeded:', JSON.stringify(slotsNeeded));
+  console.log('slotsToFill:', JSON.stringify(slotsToFill));
+  console.log('locked:', locked.map(p => p.name + ' -> slot:' + p._slot + ' pos:' + p.pos));
+  console.log('bestCombo:', bestCombo.map(p => p.name + ' pos:' + p.pos));
+  console.log('luLineup full:', luLineup.map(p=>p.name+' | pos:'+p.pos+' | slot:'+(p._slot||'auto')));
+
   // Safety net: count slots and warn if wrong
   const REQUIRED = { SP: 2, C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 3 };
   const actualSlots = { SP: 0, C: 0, '1B': 0, '2B': 0, '3B': 0, SS: 0, OF: 0 };

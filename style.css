@@ -290,3 +290,60 @@ tr:hover td { background: var(--gray-50); }
   box-shadow: 0 0 0 3px rgba(192,57,43,.12) !important;
   background: var(--red-light) !important;
 }
+
+/* GPP strategy tab */
+.gpp-steps {
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+.gpp-steps li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--gray-800);
+}
+.gpp-text {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--gray-700);
+}
+.gpp-bullets {
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+.gpp-bullets li {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--gray-800);
+}
+.gpp-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 700px) {
+  .gpp-compare { grid-template-columns: 1fr; }
+}
+.gpp-col h4 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: .5rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gray-900);
+}
+.gpp-col ul {
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+.gpp-col li {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--gray-700);
+}
