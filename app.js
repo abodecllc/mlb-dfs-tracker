@@ -765,56 +765,73 @@ function buildLineup() {
     return aOpts - bOpts;
   });
 
-  // Recursive optimizer with budget headroom check
-  let bestTotal = -1;
-  let bestCombo = null;
+  // ── Greedy optimizer with salary headroom check ──────────────────────────
+  // Fill slots in order (most constrained first).
+  // At each step: pick highest-consensus player where salary leaves enough
+  // for all remaining slots at their minimum cost.
+  // To avoid local optima, run N_PASSES greedy passes with slight variation
+  // and keep the best result.
 
-  function optimize(slotIdx, chosen, usedNames, budgetLeft) {
-    if (slotIdx === slotsToFill.length) {
-      const total = chosen.reduce((a,p) => a + p.consensus, 0);
-      if (total > bestTotal) { bestTotal = total; bestCombo = [...chosen]; }
-      return;
+  function greedyPass(slotsArr, startPool, budget) {
+    const chosen = [];
+    const used = new Set(lockedNames);
+    let left = budget;
+
+    for (const pos of slotsArr) {
+      // Min cost needed for slots after this one
+      const remaining = slotsArr.slice(slotsArr.indexOf(pos) + 1 + chosen.length - chosen.length);
+      // simpler: track index manually
+      const idx = chosen.length;
+      const restSlots = slotsArr.slice(idx + 1);
+      const minRest = restSlots.reduce((sum, rpos) => {
+        const opts = startPool.filter(p =>
+          p.pos.split('/')[0].trim() === rpos && !used.has(p.name)
+        );
+        return sum + (opts.length ? Math.min(...opts.map(p=>p.sal)) : 0);
+      }, 0);
+
+      const budget_for_this = left - minRest;
+      const candidates = startPool.filter(p =>
+        p.pos.split('/')[0].trim() === pos &&
+        !used.has(p.name) &&
+        p.sal <= budget_for_this
+      ).sort((a,b) => b.consensus - a.consensus);
+
+      if (!candidates.length) return null; // dead end
+      const pick = candidates[0];
+      chosen.push(pick);
+      used.add(pick.name);
+      left -= pick.sal;
     }
-    const pos = slotsToFill[slotIdx];
-    // Merge usedNames + chosen into one set for all candidate/cost lookups
-    const allUsed = new Set([...usedNames, ...chosen.map(p => p.name)]);
-    const remainingSlots = slotsToFill.slice(slotIdx + 1);
-    const minRemaining = remainingSlots.reduce((sum, rpos) => {
-      return sum + minCostPerPos(rpos, allUsed);
-    }, 0);
-    const candidates = getCandidates(pos, allUsed, budgetLeft - minRemaining);
-    const topN = candidates.slice(0, 12);
-    for (const p of topN) {
-      chosen.push(p);
-      optimize(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
-      chosen.pop();
-    }
+    return chosen;
   }
 
-  optimize(0, [], new Set(lockedNames), remaining);
+  // Sort slots: most constrained (fewest candidates) first
+  const sortedSlots = [...slotsToFill].sort((a, b) => {
+    const aOpts = getCandidates(a, lockedNames, remaining).length;
+    const bOpts = getCandidates(b, lockedNames, remaining).length;
+    return aOpts - bOpts;
+  });
 
-  if (!bestCombo) {
-    // Last resort: relax consensus threshold entirely and try again
-    warnings.push('Could not find a valid lineup within budget using consensus pool - using best available players regardless of source disagreement.');
-    const anyPool = [...luPool].filter(p => !new Set(lockedNames).has(p.name) && !excludeTeams.has(p.team.toUpperCase()));
-    function optimizeFallback(slotIdx, chosen, usedNames, budgetLeft) {
-      if (slotIdx === slotsToFill.length) {
-        const total = chosen.reduce((a,p) => a + p.consensus, 0);
-        if (total > bestTotal) { bestTotal = total; bestCombo = [...chosen]; }
-        return;
-      }
-      const pos = slotsToFill[slotIdx];
-      const allUsedFb = new Set([...usedNames, ...chosen.map(p => p.name)]);
-      const candidates = anyPool.filter(p =>
-        p.pos && p.pos.split('/')[0].trim() === pos && !allUsedFb.has(p.name) && p.sal <= budgetLeft
-      ).sort((a,b) => b.consensus - a.consensus).slice(0, 10);
-      for (const p of candidates) {
-        chosen.push(p);
-        optimizeFallback(slotIdx + 1, chosen, usedNames, budgetLeft - p.sal);
-        chosen.pop();
+  // Try consensus pool first, then eligible, then full pool
+  const poolsToTry = [consensusPool, eligiblePool, luPool.filter(p => !excludeTeams.has(p.team.toUpperCase()))];
+  let bestCombo = null;
+  let bestTotal = -1;
+
+  for (const tryPool of poolsToTry) {
+    if (bestCombo) break;
+    // Try a few slot orderings to avoid local optima
+    const orderings = [sortedSlots, [...sortedSlots].reverse(), slotsToFill];
+    for (const ordering of orderings) {
+      const result = greedyPass(ordering, tryPool, remaining);
+      if (result) {
+        const total = result.reduce((a,p) => a + p.consensus, 0);
+        if (total > bestTotal) { bestTotal = total; bestCombo = result; }
       }
     }
-    optimizeFallback(0, [], new Set(lockedNames), remaining);
+    if (!bestCombo && tryPool === consensusPool) {
+      warnings.push('No consensus lineup found within budget - relaxing disagreement threshold.');
+    }
   }
 
   if (!bestCombo) {
