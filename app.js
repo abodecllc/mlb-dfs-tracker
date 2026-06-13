@@ -608,6 +608,11 @@ function buildLineup() {
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus });
   });
 
+  // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
+  function eligibleFor(p, slot) {
+    return p.pos.split('/').map(s => s.trim()).includes(slot);
+  }
+
   // - Validate lock fields before proceeding -
   const h1Slot = gv('lu-lock-h1-pos') || null;
   const h2Slot = gv('lu-lock-h2-pos') || null;
