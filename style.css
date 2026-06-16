@@ -347,3 +347,58 @@ tr:hover td { background: var(--gray-50); }
   line-height: 1.55;
   color: var(--gray-700);
 }
+
+/* GPP section header */
+.gpp-section-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gray-500);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-bottom: .75rem;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--green);
+  display: inline-block;
+}
+
+/* 3-lineup card grid */
+.gpp-3lu {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 700px) { .gpp-3lu { grid-template-columns: 1fr; } }
+
+.gpp-lu-card {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: .875rem;
+}
+.gpp-lu-num {
+  width: 24px; height: 24px;
+  background: var(--green);
+  color: #fff;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 6px;
+}
+.gpp-lu-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gray-800);
+  margin-bottom: 6px;
+}
+.gpp-lu-card ul {
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.gpp-lu-card li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gray-700);
+}
