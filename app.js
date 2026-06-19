@@ -1168,71 +1168,76 @@ function buildShowdown() {
   const consensusPool = sdPool.filter(p => p.diff <= MAX_DIFF);
   const eligiblePool  = sdPool;
 
-  function tryBuild(pool) {
-    const used = new Set();
-    let captain = lockedCpt;
-    let budgetLeft = CAP;
-
-    if (!captain) {
-      // Pick highest consensus overall as captain (cash = best player, no leverage logic)
-      const sorted = [...pool].sort((a,b) => b.consensus - a.consensus);
-      captain = sorted[0];
+  function tryBuildBestCaptain(pool) {
+    if (lockedCpt) return tryBuildWithCaptain(pool, lockedCpt);
+    // No captain locked: try top N captains by consensus until one produces a feasible lineup
+    const sorted = [...pool].sort((a,b) => b.consensus - a.consensus);
+    for (const cptCandidate of sorted.slice(0, 8)) {
+      const result = tryBuildWithCaptain(pool, cptCandidate);
+      if (result) return result;
     }
-    if (!captain) { sdLastFailReason = `No captain candidate available (pool size: ${pool.length}).`; return null; }
+    sdLastFailReason = `Tried top 8 captain candidates, none produced a lineup within the $${CAP.toLocaleString()} cap with the team-min-1 constraint. The salary cap may be set too low for this slate, or the player pool too thin (pool size: ${pool.length}).`;
+    return null;
+  }
+
+  function tryBuildWithCaptain(pool, forcedCaptain) {
+    const used = new Set();
+    const captain = forcedCaptain;
+    let budgetLeft = CAP;
 
     used.add(captain.name);
     const cptCost = SITE === 'FD' ? captain.sal : Math.round(captain.sal * 1.5);
     budgetLeft -= cptCost;
+    if (budgetLeft < 0) return null;
 
     const flexChosen = [];
     if (lockedFlex && lockedFlex.name !== captain.name) {
       flexChosen.push(lockedFlex);
       used.add(lockedFlex.name);
       budgetLeft -= lockedFlex.sal;
+      if (budgetLeft < 0) return null;
     }
 
     const flexNeeded = ROSTER_SIZE - 1 - flexChosen.length;
     const candidates = pool.filter(p => !used.has(p.name)).sort((a,b) => b.consensus - a.consensus);
 
     for (let i = 0; i < flexNeeded; i++) {
-      // ensure team-min-1 constraint: if this is the last pick and one team is unrepresented, force it
       const teamsUsed = new Set([captain.team, ...flexChosen.map(p=>p.team)]);
       const missingTeam = teams.find(t => !teamsUsed.has(t));
       const slotsLeftAfterThis = flexNeeded - i - 1;
+
+      const unusedSorted = candidates.filter(p => !used.has(p.name)).sort((a,b) => a.sal - b.sal);
+      const minForRest = unusedSorted.slice(0, slotsLeftAfterThis).reduce((sum, p) => sum + p.sal, 0);
+      const maxSpendNow = budgetLeft - minForRest;
+
       let pick;
       if (missingTeam && slotsLeftAfterThis === 0) {
-        // must pick from missing team now
         pick = candidates.find(p => p.team === missingTeam && !used.has(p.name) && p.sal <= budgetLeft);
       }
-      if (!pick) {
-        pick = candidates.find(p => !used.has(p.name) && p.sal <= budgetLeft);
-      }
-      if (!pick) {
-        sdLastFailReason = `Failed at FLEX slot ${i+1}/${flexNeeded}. Budget left: $${budgetLeft}. Missing team: ${missingTeam||'none'}. Candidates remaining: ${candidates.filter(p=>!used.has(p.name)).length}. Cheapest unused candidate: ${(() => { const c = candidates.filter(p=>!used.has(p.name)).sort((a,b)=>a.sal-b.sal)[0]; return c ? c.name+' $'+c.sal : 'none'; })()}`;
-        return null;
-      }
+      if (!pick) pick = candidates.find(p => !used.has(p.name) && p.sal <= maxSpendNow);
+      if (!pick) pick = candidates.find(p => !used.has(p.name) && p.sal <= budgetLeft);
+      if (!pick) return null;
+
       flexChosen.push(pick);
       used.add(pick.name);
       budgetLeft -= pick.sal;
     }
 
-    const lineup = [{ ...captain, _slot: SITE === 'FD' ? 'MVP' : 'CPT', _cost: cptCost, _pts: captain.consensus * CPT_MULT_PTS }]
+    return [{ ...captain, _slot: SITE === 'FD' ? 'MVP' : 'CPT', _cost: cptCost, _pts: captain.consensus * CPT_MULT_PTS }]
       .concat(flexChosen.map(p => ({ ...p, _slot: 'FLEX', _cost: p.sal, _pts: p.consensus })));
-
-    return lineup;
   }
 
-  let result = tryBuild(consensusPool);
+  let result = tryBuildBestCaptain(consensusPool);
   const warnings = [];
   if (stokOnly) {
     warnings.push('Built from Stokastic projections only (SplashPlay skipped or not available for this slate) — no cross-source consensus check applied.');
   }
   if (!result) {
     warnings.push('No valid consensus lineup found within budget -- relaxing disagreement threshold.');
-    result = tryBuild(eligiblePool);
+    result = tryBuildBestCaptain(eligiblePool);
   }
   if (!result) {
-    showAlert('sd-alert', `Could not build a valid showdown lineup. ${sdLastFailReason || 'Check salary cap or locked players.'}`, 'danger');
+    showAlert('sd-alert', `Could not build a valid showdown lineup. ${sdLastFailReason || 'Salary cap may be too tight for this slate -- check the Cap setting.'}`, 'danger');
     return;
   }
 
