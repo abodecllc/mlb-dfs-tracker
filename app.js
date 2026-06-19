@@ -541,12 +541,20 @@ function parseLuSalaries(rows) {
   rows.forEach(r => {
     const name = (r['name'] || r['Name'] || '').trim();
     const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
-    const rawPos  = (r['position'] || r['Position'] || '').trim();
-    const team = (r['teamabbrev'] || r['TeamAbbrev'] || r['team abbrev'] || r['Team Abbrev'] || '').trim();
-    const id   = (r['id'] || r['ID'] || r['playerid'] || r['PlayerID'] || r['player id'] || '').trim();
+    const rawPos  = (r['position'] || r['Position'] || r['roster position'] || '').trim();
+    const team = (r['teamabbrev'] || r['team abbrev'] || r['team'] || r['Team'] || '').trim();
+    const id   = (r['id'] || r['ID'] || r['playerid'] || r['player id'] || '').trim();
     // Normalize: SP/RP both become SP for optimizer; keep multi-position as-is
-    const pos = (rawPos === 'RP') ? 'SP' : rawPos;
-    if (name && sal) out[name] = { sal, pos, team, id };
+    // Showdown CPT/MVP rows: strip to base position so eligibility checks still work
+    let pos = (rawPos === 'RP') ? 'SP' : rawPos;
+    pos = pos.replace(/^CPT\/?/, '').replace(/^MVP\/?/, '') || pos;
+    if (name && sal) {
+      // If a name appears twice (e.g. once as CPT row, once as FLEX row in showdown exports),
+      // keep the one with team info, or the first one seen
+      if (!out[name] || (!out[name].team && team)) {
+        out[name] = { sal, pos, team, id };
+      }
+    }
   });
   return out;
 }
@@ -1096,7 +1104,8 @@ function buildShowdown() {
     if (!salData) return;
     const stEntry = stokMap[name];
     const st = stEntry ? stEntry.proj : 0;
-    const team = salData.team || (stEntry ? stEntry.team : '');
+    let team = salData.team || (stEntry ? stEntry.team : '');
+    team = team.toUpperCase();
     if (salData.sal === 0) return;
 
     if (stokOnly) {
@@ -1116,9 +1125,11 @@ function buildShowdown() {
     showAlert('sd-alert', 'No matching players found across the uploaded files.', 'danger'); return;
   }
 
-  const teams = [...new Set(sdPool.map(p => p.team))];
+  const teams = [...new Set(sdPool.map(p => p.team).filter(Boolean))];
   if (teams.length !== 2) {
-    showAlert('sd-alert', `Expected 2 teams in this showdown slate, found ${teams.length}: ${teams.join(', ')}. Check your uploaded files.`, 'danger');
+    const sample = sdPool.slice(0, 5).map(p => `${p.name} (team:"${p.team}")`).join(', ');
+    showAlert('sd-alert', `Expected exactly 2 teams, found ${teams.length}: [${teams.join(', ')}]. Sample players: ${sample}. Check that your salary file has a Team/TeamAbbrev column.`, 'danger');
+    return;
   }
 
   // Validate Captain lock
