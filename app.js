@@ -1431,7 +1431,7 @@ function exportShowdown() {
 
   let header, cells;
   if (SITE === 'DK') {
-    header = 'CPT,FLEX,FLEX,FLEX,FLEX,FLEX';
+    header = 'CPT,UTIL,UTIL,UTIL,UTIL,UTIL';
     cells = sdLineup.map(p => {
       const salEntry = salMap[p.name];
       const id = salEntry ? salEntry.id : '';
