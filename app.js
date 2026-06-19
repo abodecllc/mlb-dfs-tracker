@@ -1034,6 +1034,7 @@ function resetLineupBuilder() {
 
 const sdData = { sal: null, splash: null, stok: null };
 let sdPool = [];
+let sdLastFailReason = '';
 let sdLineup = [];
 
 let sdSplashSkipped = false;
@@ -1177,7 +1178,7 @@ function buildShowdown() {
       const sorted = [...pool].sort((a,b) => b.consensus - a.consensus);
       captain = sorted[0];
     }
-    if (!captain) return null;
+    if (!captain) { sdLastFailReason = `No captain candidate available (pool size: ${pool.length}).`; return null; }
 
     used.add(captain.name);
     const cptCost = SITE === 'FD' ? captain.sal : Math.round(captain.sal * 1.5);
@@ -1206,7 +1207,10 @@ function buildShowdown() {
       if (!pick) {
         pick = candidates.find(p => !used.has(p.name) && p.sal <= budgetLeft);
       }
-      if (!pick) return null;
+      if (!pick) {
+        sdLastFailReason = `Failed at FLEX slot ${i+1}/${flexNeeded}. Budget left: $${budgetLeft}. Missing team: ${missingTeam||'none'}. Candidates remaining: ${candidates.filter(p=>!used.has(p.name)).length}. Cheapest unused candidate: ${(() => { const c = candidates.filter(p=>!used.has(p.name)).sort((a,b)=>a.sal-b.sal)[0]; return c ? c.name+' $'+c.sal : 'none'; })()}`;
+        return null;
+      }
       flexChosen.push(pick);
       used.add(pick.name);
       budgetLeft -= pick.sal;
@@ -1228,7 +1232,7 @@ function buildShowdown() {
     result = tryBuild(eligiblePool);
   }
   if (!result) {
-    showAlert('sd-alert', 'Could not build a valid showdown lineup -- check salary cap or locked players.', 'danger');
+    showAlert('sd-alert', `Could not build a valid showdown lineup. ${sdLastFailReason || 'Check salary cap or locked players.'}`, 'danger');
     return;
   }
 
