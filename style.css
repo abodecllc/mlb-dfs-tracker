@@ -406,3 +406,24 @@ tr:hover td { background: var(--gray-50); }
   line-height: 1.5;
   color: var(--gray-700);
 }
+
+/* Optional upload tag */
+.optional-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border-radius: 10px;
+  padding: 1px 7px;
+  margin-left: 5px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+
+/* Skipped upload slot */
+.lu-upload-slot.skipped {
+  border-color: var(--gold);
+  background: var(--gold-light);
+}
+.lu-upload-slot.skipped i { color: var(--gold); }
+.lu-upload-slot.skipped .lu-slot-status { color: var(--gold); }

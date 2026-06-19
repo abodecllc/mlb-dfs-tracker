@@ -1028,6 +1028,8 @@ const sdData = { sal: null, splash: null, stok: null };
 let sdPool = [];
 let sdLineup = [];
 
+let sdSplashSkipped = false;
+
 function handleSdFile(type, file) {
   if (!file) return;
   const reader = new FileReader();
@@ -1035,21 +1037,40 @@ function handleSdFile(type, file) {
     const rows = parseCSV(e.target.result);
     if (!rows.length) { showAlert('sd-alert', `Could not parse ${type} file.`, 'danger'); return; }
     sdData[type] = rows;
+    if (type === 'splash') sdSplashSkipped = false;
     const slot = g(`sd-slot-${type}`);
     const status = g(`sd-status-${type}`);
     slot.classList.add('uploaded');
     status.textContent = `OK ${rows.length} rows loaded`;
-    if (sdData.sal && sdData.splash && sdData.stok) {
-      g('sd-settings-card').style.display = 'block';
-      showAlert('sd-alert', 'All files loaded -- configure settings and build.', 'success');
-    }
+    checkSdReady();
   };
   reader.readAsText(file);
 }
 
+function skipSplashplay() {
+  sdSplashSkipped = true;
+  sdData.splash = null;
+  const slot = g('sd-slot-splash');
+  const status = g('sd-status-splash');
+  slot.classList.add('uploaded');
+  slot.classList.add('skipped');
+  status.textContent = 'Skipped — Stokastic only';
+  showAlert('sd-alert', 'SplashPlay skipped. Lineup will be built from Stokastic projections alone.', 'info');
+  checkSdReady();
+}
+
+function checkSdReady() {
+  const splashReady = sdData.splash || sdSplashSkipped;
+  if (sdData.sal && splashReady && sdData.stok) {
+    g('sd-settings-card').style.display = 'block';
+    if (!sdSplashSkipped) showAlert('sd-alert', 'All files loaded -- configure settings and build.', 'success');
+  }
+}
+
 function buildShowdown() {
-  if (!sdData.sal || !sdData.splash || !sdData.stok) {
-    showAlert('sd-alert', 'Please upload all three files first.', 'info'); return;
+  const splashReady = sdData.splash || sdSplashSkipped;
+  if (!sdData.sal || !splashReady || !sdData.stok) {
+    showAlert('sd-alert', 'Please upload Salaries + Stokastic, and either upload SplashPlay or click Skip.', 'info'); return;
   }
 
   const SITE     = gv('sd-site') || 'DK';
@@ -1058,31 +1079,41 @@ function buildShowdown() {
   const ROSTER_SIZE = SITE === 'FD' ? 5 : 6;
   const CPT_MULT_SAL  = SITE === 'FD' ? 1 : 1.5; // FD MVP salary same as FLEX, DK CPT costs 1.5x
   const CPT_MULT_PTS  = SITE === 'FD' ? 2 : 1.5;
+  const stokOnly = sdSplashSkipped || !sdData.splash;
 
   // Parse sources (reuse main cash builder parsers)
   const salMap    = parseLuSalaries(sdData.sal);
-  const splashMap = parseLuSplash(sdData.splash);
+  const splashMap = stokOnly ? {} : parseLuSplash(sdData.splash);
   const stokMap   = parseLuStok(sdData.stok);
 
   sdPool = [];
-  const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
+  const allNames = stokOnly
+    ? new Set(Object.keys(salMap))
+    : new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
+
   allNames.forEach(name => {
     const salData = salMap[name];
     if (!salData) return;
-    const sp = splashMap[name] || 0;
     const stEntry = stokMap[name];
     const st = stEntry ? stEntry.proj : 0;
     const team = salData.team || (stEntry ? stEntry.team : '');
-    if (sp === 0 || st === 0) return;
     if (salData.sal === 0) return;
-    const diff = Math.abs(sp - st);
-    const consensus = (sp + st) / 2;
-    // FLEX-level salary (DK showdown salary file already lists FLEX-cost; captain is 1.5x of this)
-    sdPool.push({ name, team, sal: salData.sal, sp, st, diff, consensus });
+
+    if (stokOnly) {
+      // Stokastic-only: no second source, so "consensus" = Stokastic projection, diff = 0
+      if (st === 0) return;
+      sdPool.push({ name, team, sal: salData.sal, sp: st, st, diff: 0, consensus: st });
+    } else {
+      const sp = splashMap[name] || 0;
+      if (sp === 0 || st === 0) return;
+      const diff = Math.abs(sp - st);
+      const consensus = (sp + st) / 2;
+      sdPool.push({ name, team, sal: salData.sal, sp, st, diff, consensus });
+    }
   });
 
   if (!sdPool.length) {
-    showAlert('sd-alert', 'No matching players found across all three files.', 'danger'); return;
+    showAlert('sd-alert', 'No matching players found across the uploaded files.', 'danger'); return;
   }
 
   const teams = [...new Set(sdPool.map(p => p.team))];
@@ -1178,6 +1209,9 @@ function buildShowdown() {
 
   let result = tryBuild(consensusPool);
   const warnings = [];
+  if (stokOnly) {
+    warnings.push('Built from Stokastic projections only (SplashPlay skipped or not available for this slate) — no cross-source consensus check applied.');
+  }
   if (!result) {
     warnings.push('No valid consensus lineup found within budget -- relaxing disagreement threshold.');
     result = tryBuild(eligiblePool);
@@ -1187,9 +1221,11 @@ function buildShowdown() {
     return;
   }
 
-  result.forEach(p => {
-    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts).`);
-  });
+  if (!stokOnly) {
+    result.forEach(p => {
+      if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts).`);
+    });
+  }
 
   sdLineup = result;
   renderShowdownResult(warnings, CAP, SITE);
@@ -1330,9 +1366,10 @@ function exportShowdown() {
 
 function resetShowdownBuilder() {
   sdData.sal = sdData.splash = sdData.stok = null;
+  sdSplashSkipped = false;
   sdPool = []; sdLineup = [];
   ['sal','splash','stok'].forEach(t => {
-    const slot = g(`sd-slot-${t}`); if (slot) slot.classList.remove('uploaded');
+    const slot = g(`sd-slot-${t}`); if (slot) { slot.classList.remove('uploaded'); slot.classList.remove('skipped'); }
     const status = g(`sd-status-${t}`); if (status) status.textContent = 'Not uploaded';
     const file = g(`sd-file-${t}`); if (file) file.value = '';
   });

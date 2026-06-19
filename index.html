@@ -230,8 +230,8 @@
           </div>
           <div class="lu-upload-slot" id="sd-slot-splash">
             <i class="ti ti-file-spreadsheet"></i>
-            <div class="lu-slot-label">SplashPlay Projections</div>
-            <div class="lu-slot-hint">Export from SplashPlay</div>
+            <div class="lu-slot-label">SplashPlay Projections <span class="optional-tag">optional</span></div>
+            <div class="lu-slot-hint">Export from SplashPlay — skip if slate isn't covered</div>
             <div class="lu-slot-status" id="sd-status-splash">Not uploaded</div>
             <input type="file" id="sd-file-splash" accept=".csv" onchange="handleSdFile('splash',this.files[0])">
           </div>
@@ -242,6 +242,9 @@
             <div class="lu-slot-status" id="sd-status-stok">Not uploaded</div>
             <input type="file" id="sd-file-stok" accept=".csv" onchange="handleSdFile('stok',this.files[0])">
           </div>
+        </div>
+        <div class="btn-row" style="margin-top:.75rem">
+          <button class="btn btn-sm" onclick="skipSplashplay()"><i class="ti ti-player-skip-forward"></i> Skip SplashPlay — Stokastic only</button>
         </div>
       </div>
 
