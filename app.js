@@ -765,50 +765,88 @@ function buildLineup() {
     return aOpts - bOpts;
   });
 
-  // - Greedy optimizer with salary headroom check -
-  // Fill slots in order (most constrained first).
-  // At each step: pick highest-consensus player where salary leaves enough
-  // for all remaining slots at their minimum cost.
-  // To avoid local optima, run N_PASSES greedy passes with slight variation
-  // and keep the best result.
+  // - Optimizer: beam search when locks constrain the budget, fast greedy otherwise -
+  // Locking expensive players (e.g. 2 top-salary SPs) squeezes the remaining budget
+  // and a naive greedy fill front-loads early slots, starving later ones into
+  // minimum-salary picks. Beam search avoids that by exploring top-N candidates
+  // per slot. It's only needed when slots are already constrained by locks --
+  // with no locks (10 open slots) the search space is too large to brute-force
+  // in-browser, but greedy-with-headroom is already close to optimal there since
+  // the optimizer has full freedom to balance SP vs hitter spend itself.
 
-  function greedyPass(slotsArr, startPool, budget) {
-    const chosen = [];
+  const BEAM_WIDTH = 10;
+  const USE_BEAM_SEARCH = slotsToFill.length <= 8; // locks present -> budget likely constrained
+
+  function minCostForSlots(pool, slotsArr, usedNames) {
+    return slotsArr.reduce((sum, pos) => {
+      const opts = pool.filter(p => eligibleFor(p, pos) && !usedNames.has(p.name));
+      const cheapest = opts.length ? Math.min(...opts.map(p => p.sal)) : Infinity;
+      return sum + cheapest;
+    }, 0);
+  }
+
+  function beamSearch(slotsArr, startPool, budget) {
+    const candidatesPerSlot = slotsArr.map(pos =>
+      startPool.filter(p => eligibleFor(p, pos))
+               .sort((a, b) => b.consensus - a.consensus)
+               .slice(0, BEAM_WIDTH)
+    );
+
+    let best = { total: -1, combo: null };
+
+    function dfs(slotIdx, used, budgetLeft, chosen) {
+      if (slotIdx === slotsArr.length) {
+        const total = chosen.reduce((s, p) => s + p.consensus, 0);
+        if (total > best.total) { best.total = total; best.combo = [...chosen]; }
+        return;
+      }
+      const restSlots = slotsArr.slice(slotIdx + 1);
+      const minRest = minCostForSlots(startPool, restSlots, used);
+      if (minRest === Infinity) return;
+
+      for (const p of candidatesPerSlot[slotIdx]) {
+        if (used.has(p.name)) continue;
+        if (p.sal > budgetLeft - minRest) continue;
+        used.add(p.name);
+        chosen.push(Object.assign(Object.create(Object.getPrototypeOf(p)), p, { _slot: slotsArr[slotIdx] }));
+        dfs(slotIdx + 1, used, budgetLeft - p.sal, chosen);
+        chosen.pop();
+        used.delete(p.name);
+      }
+    }
+
+    dfs(0, new Set(lockedNames), budget, []);
+    return best.combo;
+  }
+
+  function greedyWithHeadroom(slotsArr, startPool, budget) {
     const used = new Set(lockedNames);
+    const chosen = [];
     let left = budget;
-
-    for (const pos of slotsArr) {
-      // Min cost needed for slots after this one
-      const remaining = slotsArr.slice(slotsArr.indexOf(pos) + 1 + chosen.length - chosen.length);
-      // simpler: track index manually
-      const idx = chosen.length;
-      const restSlots = slotsArr.slice(idx + 1);
-      const minRest = restSlots.reduce((sum, rpos) => {
-        const opts = startPool.filter(p =>
-          eligibleFor(p, rpos) && !used.has(p.name)
-        );
-        return sum + (opts.length ? Math.min(...opts.map(p=>p.sal)) : 0);
-      }, 0);
-
-      const budget_for_this = left - minRest;
-      const candidates = startPool.filter(p =>
-        eligibleFor(p, pos) &&
-        !used.has(p.name) &&
-        p.sal <= budget_for_this
-      ).sort((a,b) => b.consensus - a.consensus);
-
-      if (!candidates.length) return null; // dead end
-      const pick = candidates[0];
-      // Tag with the slot actually being filled (handles multi-pos players)
-      const tagged = Object.assign(Object.create(Object.getPrototypeOf(pick)), pick, { _slot: pos });
-      chosen.push(tagged);
+    for (let idx = 0; idx < slotsArr.length; idx++) {
+      const pos = slotsArr[idx];
+      const rest = slotsArr.slice(idx + 1);
+      const minRest = minCostForSlots(startPool, rest, used);
+      const budgetForThis = left - minRest;
+      const cands = startPool
+        .filter(p => eligibleFor(p, pos) && !used.has(p.name) && p.sal <= budgetForThis)
+        .sort((a, b) => b.consensus - a.consensus);
+      if (!cands.length) return null;
+      const pick = cands[0];
+      chosen.push(Object.assign(Object.create(Object.getPrototypeOf(pick)), pick, { _slot: pos }));
       used.add(pick.name);
       left -= pick.sal;
     }
     return chosen;
   }
 
-  // Sort slots: most constrained (fewest candidates) first
+  function solve(slotsArr, startPool, budget) {
+    return USE_BEAM_SEARCH
+      ? beamSearch(slotsArr, startPool, budget)
+      : greedyWithHeadroom(slotsArr, startPool, budget);
+  }
+
+  // Sort slots: most constrained (fewest candidates) first - helps search prune faster
   const sortedSlots = [...slotsToFill].sort((a, b) => {
     const aOpts = getCandidates(a, lockedNames, remaining).length;
     const bOpts = getCandidates(b, lockedNames, remaining).length;
@@ -822,14 +860,10 @@ function buildLineup() {
 
   for (const tryPool of poolsToTry) {
     if (bestCombo) break;
-    // Try a few slot orderings to avoid local optima
-    const orderings = [sortedSlots, [...sortedSlots].reverse(), slotsToFill];
-    for (const ordering of orderings) {
-      const result = greedyPass(ordering, tryPool, remaining);
-      if (result) {
-        const total = result.reduce((a,p) => a + p.consensus, 0);
-        if (total > bestTotal) { bestTotal = total; bestCombo = result; }
-      }
+    const result = solve(sortedSlots, tryPool, remaining);
+    if (result) {
+      const total = result.reduce((a,p) => a + p.consensus, 0);
+      if (total > bestTotal) { bestTotal = total; bestCombo = result; }
     }
     if (!bestCombo && tryPool === consensusPool) {
       warnings.push('No consensus lineup found within budget - relaxing disagreement threshold.');
