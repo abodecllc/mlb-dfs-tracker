@@ -541,18 +541,21 @@ function parseLuSalaries(rows) {
   rows.forEach(r => {
     const name = (r['name'] || r['Name'] || '').trim();
     const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
-    const rawPos  = (r['position'] || r['Position'] || r['roster position'] || '').trim();
+    const rawRosterPos = (r['roster position'] || r['Roster Position'] || '').trim();
+    const rawPos  = (r['position'] || r['Position'] || rawRosterPos || '').trim();
     const team = (r['teamabbrev'] || r['team abbrev'] || r['team'] || r['Team'] || '').trim();
     const id   = (r['id'] || r['ID'] || r['playerid'] || r['player id'] || '').trim();
     // Normalize: SP/RP both become SP for optimizer; keep multi-position as-is
-    // Showdown CPT/MVP rows: strip to base position so eligibility checks still work
     let pos = (rawPos === 'RP') ? 'SP' : rawPos;
     pos = pos.replace(/^CPT\/?/, '').replace(/^MVP\/?/, '') || pos;
     if (name && sal) {
-      // If a name appears twice (e.g. once as CPT row, once as FLEX row in showdown exports),
-      // keep the one with team info, or the first one seen
-      if (!out[name] || (!out[name].team && team)) {
-        out[name] = { sal, pos, team, id };
+      // Showdown exports list each player twice: once as CPT (salary already x1.5)
+      // and once as UTIL/FLEX (true base salary). Always keep the FLEX/UTIL base
+      // salary row -- the builder applies its own 1.5x/2x multiplier for captain cost.
+      const isCptRow = rawRosterPos === 'CPT' || rawRosterPos === 'MVP';
+      const existingIsCpt = out[name] && out[name]._isCpt;
+      if (!out[name] || (existingIsCpt && !isCptRow)) {
+        out[name] = { sal, pos, team, id, _isCpt: isCptRow };
       }
     }
   });
