@@ -1019,3 +1019,326 @@ function resetLineupBuilder() {
     const el = g(id); if(el) el.value = '';
   });
 }
+
+// ============================================================================
+// SHOWDOWN CASH LINEUP BUILDER
+// ============================================================================
+
+const sdData = { sal: null, splash: null, stok: null };
+let sdPool = [];
+let sdLineup = [];
+
+function handleSdFile(type, file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if (!rows.length) { showAlert('sd-alert', `Could not parse ${type} file.`, 'danger'); return; }
+    sdData[type] = rows;
+    const slot = g(`sd-slot-${type}`);
+    const status = g(`sd-status-${type}`);
+    slot.classList.add('uploaded');
+    status.textContent = `OK ${rows.length} rows loaded`;
+    if (sdData.sal && sdData.splash && sdData.stok) {
+      g('sd-settings-card').style.display = 'block';
+      showAlert('sd-alert', 'All files loaded -- configure settings and build.', 'success');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function buildShowdown() {
+  if (!sdData.sal || !sdData.splash || !sdData.stok) {
+    showAlert('sd-alert', 'Please upload all three files first.', 'info'); return;
+  }
+
+  const SITE     = gv('sd-site') || 'DK';
+  const CAP      = parseInt(gv('sd-cap')) || 50000;
+  const MAX_DIFF = parseFloat(g('sd-max-diff').value) || 2.5;
+  const ROSTER_SIZE = SITE === 'FD' ? 5 : 6;
+  const CPT_MULT_SAL  = SITE === 'FD' ? 1 : 1.5; // FD MVP salary same as FLEX, DK CPT costs 1.5x
+  const CPT_MULT_PTS  = SITE === 'FD' ? 2 : 1.5;
+
+  // Parse sources (reuse main cash builder parsers)
+  const salMap    = parseLuSalaries(sdData.sal);
+  const splashMap = parseLuSplash(sdData.splash);
+  const stokMap   = parseLuStok(sdData.stok);
+
+  sdPool = [];
+  const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
+  allNames.forEach(name => {
+    const salData = salMap[name];
+    if (!salData) return;
+    const sp = splashMap[name] || 0;
+    const stEntry = stokMap[name];
+    const st = stEntry ? stEntry.proj : 0;
+    const team = salData.team || (stEntry ? stEntry.team : '');
+    if (sp === 0 || st === 0) return;
+    if (salData.sal === 0) return;
+    const diff = Math.abs(sp - st);
+    const consensus = (sp + st) / 2;
+    // FLEX-level salary (DK showdown salary file already lists FLEX-cost; captain is 1.5x of this)
+    sdPool.push({ name, team, sal: salData.sal, sp, st, diff, consensus });
+  });
+
+  if (!sdPool.length) {
+    showAlert('sd-alert', 'No matching players found across all three files.', 'danger'); return;
+  }
+
+  const teams = [...new Set(sdPool.map(p => p.team))];
+  if (teams.length !== 2) {
+    showAlert('sd-alert', `Expected 2 teams in this showdown slate, found ${teams.length}: ${teams.join(', ')}. Check your uploaded files.`, 'danger');
+  }
+
+  // Validate Captain lock
+  const cptInput = gv('sd-lock-cpt');
+  const flexInput = gv('sd-lock-flex');
+  const findSdPlayer = (nameInput) => {
+    if (!nameInput) return null;
+    const nl = nameInput.trim().toLowerCase();
+    return sdPool.find(p => p.name.toLowerCase().includes(nl));
+  };
+
+  if (cptInput) {
+    const found = findSdPlayer(cptInput);
+    if (!found) {
+      const words = cptInput.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+      const suggestions = sdPool
+        .map(p => ({ name: p.name, m: words.filter(w => p.name.toLowerCase().includes(w)).length }))
+        .filter(x => x.m > 0).sort((a,b) => b.m - a.m).slice(0,3).map(x => x.name);
+      showAlert('sd-alert', `Captain "${cptInput}" not found.${suggestions.length ? ' Did you mean: ' + suggestions.join(', ') + '?' : ''}`, 'danger');
+      return;
+    }
+  }
+  if (flexInput) {
+    const found = findSdPlayer(flexInput);
+    if (!found) {
+      showAlert('sd-alert', `FLEX lock "${flexInput}" not found.`, 'danger');
+      return;
+    }
+  }
+
+  const lockedCpt  = findSdPlayer(cptInput);
+  const lockedFlex = findSdPlayer(flexInput);
+
+  // Build eligible pool: apply consensus filter
+  const consensusPool = sdPool.filter(p => p.diff <= MAX_DIFF);
+  const eligiblePool  = sdPool;
+
+  function tryBuild(pool) {
+    const used = new Set();
+    let captain = lockedCpt;
+    let budgetLeft = CAP;
+
+    if (!captain) {
+      // Pick highest consensus overall as captain (cash = best player, no leverage logic)
+      const sorted = [...pool].sort((a,b) => b.consensus - a.consensus);
+      captain = sorted[0];
+    }
+    if (!captain) return null;
+
+    used.add(captain.name);
+    const cptCost = SITE === 'FD' ? captain.sal : Math.round(captain.sal * 1.5);
+    budgetLeft -= cptCost;
+
+    const flexChosen = [];
+    if (lockedFlex && lockedFlex.name !== captain.name) {
+      flexChosen.push(lockedFlex);
+      used.add(lockedFlex.name);
+      budgetLeft -= lockedFlex.sal;
+    }
+
+    const flexNeeded = ROSTER_SIZE - 1 - flexChosen.length;
+    const candidates = pool.filter(p => !used.has(p.name)).sort((a,b) => b.consensus - a.consensus);
+
+    for (let i = 0; i < flexNeeded; i++) {
+      // ensure team-min-1 constraint: if this is the last pick and one team is unrepresented, force it
+      const teamsUsed = new Set([captain.team, ...flexChosen.map(p=>p.team)]);
+      const missingTeam = teams.find(t => !teamsUsed.has(t));
+      const slotsLeftAfterThis = flexNeeded - i - 1;
+      let pick;
+      if (missingTeam && slotsLeftAfterThis === 0) {
+        // must pick from missing team now
+        pick = candidates.find(p => p.team === missingTeam && !used.has(p.name) && p.sal <= budgetLeft);
+      }
+      if (!pick) {
+        pick = candidates.find(p => !used.has(p.name) && p.sal <= budgetLeft);
+      }
+      if (!pick) return null;
+      flexChosen.push(pick);
+      used.add(pick.name);
+      budgetLeft -= pick.sal;
+    }
+
+    const lineup = [{ ...captain, _slot: SITE === 'FD' ? 'MVP' : 'CPT', _cost: cptCost, _pts: captain.consensus * CPT_MULT_PTS }]
+      .concat(flexChosen.map(p => ({ ...p, _slot: 'FLEX', _cost: p.sal, _pts: p.consensus })));
+
+    return lineup;
+  }
+
+  let result = tryBuild(consensusPool);
+  const warnings = [];
+  if (!result) {
+    warnings.push('No valid consensus lineup found within budget -- relaxing disagreement threshold.');
+    result = tryBuild(eligiblePool);
+  }
+  if (!result) {
+    showAlert('sd-alert', 'Could not build a valid showdown lineup -- check salary cap or locked players.', 'danger');
+    return;
+  }
+
+  result.forEach(p => {
+    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts).`);
+  });
+
+  sdLineup = result;
+  renderShowdownResult(warnings, CAP, SITE);
+  g('sd-result').style.display = 'block';
+  renderSdPool();
+}
+
+function renderShowdownResult(warnings, CAP, SITE) {
+  const totalSal = sdLineup.reduce((a,p) => a + p._cost, 0);
+  const totalSP  = sdLineup.reduce((a,p) => a + p.sp * (p._slot === 'CPT' || p._slot === 'MVP' ? (SITE === 'FD' ? 2 : 1.5) : 1), 0);
+  const totalST  = sdLineup.reduce((a,p) => a + p.st * (p._slot === 'CPT' || p._slot === 'MVP' ? (SITE === 'FD' ? 2 : 1.5) : 1), 0);
+  const totalPts = sdLineup.reduce((a,p) => a + p._pts, 0);
+  const under = CAP - totalSal;
+
+  const rows = sdLineup.map(p => {
+    const diffFlag = p.diff > parseFloat(g('sd-max-diff').value || 2.5)
+      ? `<span style="color:var(--red);font-size:10px"> (warn) diff ${p.diff.toFixed(1)}</span>` : '';
+    return `<tr>
+      <td><strong>${p._slot}</strong></td>
+      <td>${p.name}${diffFlag}</td>
+      <td>${p.team}</td>
+      <td style="text-align:right">$${p._cost.toLocaleString()}</td>
+      <td style="text-align:right">${p.sp.toFixed(2)}</td>
+      <td style="text-align:right">${p.st.toFixed(2)}</td>
+      <td style="text-align:right"><strong>${p._pts.toFixed(2)}</strong></td>
+    </tr>`;
+  }).join('');
+
+  const capColor = under >= 0 ? 'var(--green)' : 'var(--red)';
+  const capLabel = under >= 0 ? `$${under.toLocaleString()} under cap` : `$${Math.abs(under).toLocaleString()} OVER CAP`;
+
+  g('sd-lineup-table').innerHTML = `
+    <table class="bd-table" style="font-size:13px">
+      <thead><tr>
+        <th style="text-align:left">Slot</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th>
+        <th>Cost</th><th>SplashPlay</th><th>Stokastic</th><th>Pts (weighted)</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr style="font-weight:600;border-top:2px solid var(--gray-200)">
+          <td colspan="3">TOTAL</td>
+          <td style="text-align:right">$${totalSal.toLocaleString()}</td>
+          <td colspan="2"></td>
+          <td style="text-align:right">${totalPts.toFixed(2)}</td>
+        </tr>
+        <tr><td colspan="7" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td></tr>
+      </tfoot>
+    </table>`;
+
+  const existingBtn = g('sd-export-btn');
+  if (existingBtn) existingBtn.remove();
+  const btn = document.createElement('button');
+  btn.id = 'sd-export-btn';
+  btn.className = 'btn primary';
+  btn.style.marginTop = '1rem';
+  btn.innerHTML = '<i class="ti ti-download"></i> Export for ' + SITE + ' upload';
+  btn.onclick = exportShowdown;
+  g('sd-lineup-table').after(btn);
+
+  g('sd-warnings').innerHTML = warnings.length
+    ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
+    : '<div style="font-size:12px;color:var(--gray-500)">No warnings -- all players within consensus threshold.</div>';
+}
+
+function renderSdPool() {
+  if (!sdPool.length) return;
+  const teamFilter = gv('sd-pool-team');
+  const sortBy = gv('sd-pool-sort') || 'consensus';
+
+  // Populate team filter once
+  const teamSel = g('sd-pool-team');
+  if (teamSel.options.length <= 1) {
+    const teams = [...new Set(sdPool.map(p => p.team))].sort();
+    teams.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      teamSel.appendChild(opt);
+    });
+  }
+
+  let data = [...sdPool];
+  if (teamFilter) data = data.filter(p => p.team === teamFilter);
+  data.sort((a,b) => {
+    if (sortBy === 'diff') return a.diff - b.diff;
+    if (sortBy === 'salary') return b.sal - a.sal;
+    return b.consensus - a.consensus;
+  });
+
+  const inLineup = new Set(sdLineup.map(p => p.name));
+  const rows = data.map(p => {
+    const highlight = inLineup.has(p.name) ? 'background:var(--green-light)' : '';
+    const flagStyle = p.diff > (parseFloat(g('sd-max-diff').value)||2.5) ? 'color:var(--red)' : 'color:var(--green)';
+    return `<tr style="${highlight}">
+      <td>${p.team}</td>
+      <td>${p.name}${inLineup.has(p.name) ? ' <span style="font-size:10px;color:var(--green);font-weight:600">IN</span>' : ''}</td>
+      <td style="text-align:right">$${p.sal.toLocaleString()}</td>
+      <td style="text-align:right">${p.sp.toFixed(2)}</td>
+      <td style="text-align:right">${p.st.toFixed(2)}</td>
+      <td style="text-align:right"><strong>${p.consensus.toFixed(2)}</strong></td>
+      <td style="text-align:right;${flagStyle}">${p.diff.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  g('sd-pool-table').innerHTML = `<table>
+    <thead><tr><th>Team</th><th>Player</th><th>Salary</th><th>SplashPlay</th><th>Stokastic</th><th>Consensus</th><th>Diff</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function exportShowdown() {
+  if (!sdLineup.length) return;
+  const SITE = gv('sd-site') || 'DK';
+  const salMap = parseLuSalaries(sdData.sal);
+
+  let header, cells;
+  if (SITE === 'DK') {
+    header = 'CPT,FLEX,FLEX,FLEX,FLEX,FLEX';
+    cells = sdLineup.map(p => {
+      const salEntry = salMap[p.name];
+      const id = salEntry ? salEntry.id : '';
+      return id ? `${p.name} (${id})` : p.name;
+    });
+  } else {
+    header = 'MVP,FLEX,FLEX,FLEX,FLEX';
+    cells = sdLineup.map(p => {
+      const salEntry = salMap[p.name];
+      const id = salEntry ? salEntry.id : '';
+      return id ? `${p.name} (${id})` : p.name;
+    });
+  }
+
+  const csv = header + '\n' + cells.join(',') + ',';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `${SITE}_showdown_cash_${todayISO()}.csv`;
+  a.click();
+}
+
+function resetShowdownBuilder() {
+  sdData.sal = sdData.splash = sdData.stok = null;
+  sdPool = []; sdLineup = [];
+  ['sal','splash','stok'].forEach(t => {
+    const slot = g(`sd-slot-${t}`); if (slot) slot.classList.remove('uploaded');
+    const status = g(`sd-status-${t}`); if (status) status.textContent = 'Not uploaded';
+    const file = g(`sd-file-${t}`); if (file) file.value = '';
+  });
+  g('sd-settings-card').style.display = 'none';
+  g('sd-result').style.display = 'none';
+  ['sd-lock-cpt','sd-lock-flex'].forEach(id => { const el = g(id); if (el) el.value = ''; });
+  const teamSel = g('sd-pool-team');
+  if (teamSel) teamSel.innerHTML = '<option value="">All teams</option>';
+}

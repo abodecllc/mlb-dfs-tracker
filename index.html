@@ -19,6 +19,7 @@
     <nav class="nav">
       <button class="tab active" onclick="showTab('import',this)"><i class="ti ti-upload"></i> Import results</button>
       <button class="tab" onclick="showTab('lineup',this)"><i class="ti ti-layout-list"></i> Cash lineup</button>
+      <button class="tab" onclick="showTab('showdown',this)"><i class="ti ti-crown"></i> Showdown cash</button>
       <button class="tab" onclick="showTab('gpp',this)"><i class="ti ti-target-arrow"></i> GPP strategy</button>
       <button class="tab" onclick="showTab('dashboard',this)"><i class="ti ti-chart-bar"></i> Dashboard</button>
       <button class="tab" onclick="showTab('history',this)"><i class="ti ti-list"></i> History</button>
@@ -210,6 +211,95 @@
             </div>
           </div>
           <div class="table-wrap"><div id="lu-pool-table"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SHOWDOWN CASH BUILDER -->
+    <div id="tab-showdown" class="section">
+      <div id="sd-alert"></div>
+      <div class="card">
+        <div class="divider">Upload files</div>
+        <div class="lu-upload-grid">
+          <div class="lu-upload-slot" id="sd-slot-sal">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">DK/FD Salaries CSV</div>
+            <div class="lu-slot-hint">Showdown slate export</div>
+            <div class="lu-slot-status" id="sd-status-sal">Not uploaded</div>
+            <input type="file" id="sd-file-sal" accept=".csv" onchange="handleSdFile('sal',this.files[0])">
+          </div>
+          <div class="lu-upload-slot" id="sd-slot-splash">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">SplashPlay Projections</div>
+            <div class="lu-slot-hint">Export from SplashPlay</div>
+            <div class="lu-slot-status" id="sd-status-splash">Not uploaded</div>
+            <input type="file" id="sd-file-splash" accept=".csv" onchange="handleSdFile('splash',this.files[0])">
+          </div>
+          <div class="lu-upload-slot" id="sd-slot-stok">
+            <i class="ti ti-file-spreadsheet"></i>
+            <div class="lu-slot-label">Stokastic Projections</div>
+            <div class="lu-slot-hint">Data Hub export, Showdown slate</div>
+            <div class="lu-slot-status" id="sd-status-stok">Not uploaded</div>
+            <input type="file" id="sd-file-stok" accept=".csv" onchange="handleSdFile('stok',this.files[0])">
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="sd-settings-card" style="display:none">
+        <div class="divider">Settings</div>
+        <div class="form-grid three">
+          <div class="field">
+            <label>Site</label>
+            <select id="sd-site">
+              <option value="DK">DraftKings (Captain 1.5x, 6 players)</option>
+              <option value="FD">FanDuel (MVP 2x, 5 players)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Max consensus disagreement (pts)</label>
+            <input type="number" id="sd-max-diff" value="2.5" step="0.5" min="0.5" max="10">
+          </div>
+          <div class="field">
+            <label>Salary cap ($)</label>
+            <input type="number" id="sd-cap" value="50000" step="100">
+          </div>
+        </div>
+        <div class="divider">Lock Captain / MVP (optional)</div>
+        <div class="form-grid" style="margin-top:0">
+          <div class="field">
+            <label>Lock Captain / MVP</label>
+            <input type="text" id="sd-lock-cpt" placeholder="Player name">
+          </div>
+          <div class="field">
+            <label>Lock a FLEX player (optional)</label>
+            <input type="text" id="sd-lock-flex" placeholder="Player name">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" onclick="buildShowdown()"><i class="ti ti-wand"></i> Build optimal cash showdown</button>
+          <button class="btn" onclick="resetShowdownBuilder()">Reset</button>
+        </div>
+      </div>
+
+      <div id="sd-result" style="display:none">
+        <div class="card">
+          <div class="divider">Optimal cash showdown lineup</div>
+          <div id="sd-lineup-table"></div>
+          <div id="sd-warnings" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <div class="divider">Full consensus pool</div>
+          <div class="history-toolbar" style="margin-bottom:.75rem">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <select id="sd-pool-team" onchange="renderSdPool()"><option value="">All teams</option></select>
+              <select id="sd-pool-sort" onchange="renderSdPool()">
+                <option value="consensus">Sort: Consensus pts</option>
+                <option value="diff">Sort: Disagreement</option>
+                <option value="salary">Sort: Salary</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap"><div id="sd-pool-table"></div></div>
         </div>
       </div>
     </div>
