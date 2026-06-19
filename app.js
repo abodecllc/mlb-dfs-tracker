@@ -1180,6 +1180,27 @@ function buildShowdown() {
     return null;
   }
 
+  // Given a partial lineup (used names, teams represented, slots remaining, budget),
+  // compute the true cheapest legal cost to fill the rest while satisfying team-min-1.
+  function cheapestCompletionCost(pool, used, teamsUsed, slotsLeft) {
+    const avail = pool.filter(p => !used.has(p.name));
+    const missingTeam = teams.find(t => !teamsUsed.has(t));
+    if (!missingTeam) {
+      // No constraint left, just cheapest N
+      const sorted = [...avail].sort((a,b) => a.sal - b.sal);
+      if (sorted.length < slotsLeft) return Infinity;
+      return sorted.slice(0, slotsLeft).reduce((s,p) => s + p.sal, 0);
+    }
+    // Must include at least one from missingTeam among the remaining picks
+    const missingTeamPlayers = avail.filter(p => p.team === missingTeam).sort((a,b) => a.sal - b.sal);
+    if (!missingTeamPlayers.length) return Infinity; // impossible, no one left from that team
+    const cheapestFromMissing = missingTeamPlayers[0];
+    const rest = avail.filter(p => p.name !== cheapestFromMissing.name).sort((a,b) => a.sal - b.sal);
+    if (rest.length < slotsLeft - 1) return Infinity;
+    const restCost = rest.slice(0, slotsLeft - 1).reduce((s,p) => s + p.sal, 0);
+    return cheapestFromMissing.sal + restCost;
+  }
+
   function tryBuildWithCaptain(pool, forcedCaptain) {
     const used = new Set();
     const captain = forcedCaptain;
@@ -1201,21 +1222,28 @@ function buildShowdown() {
     const flexNeeded = ROSTER_SIZE - 1 - flexChosen.length;
     const candidates = pool.filter(p => !used.has(p.name)).sort((a,b) => b.consensus - a.consensus);
 
+    // Upfront feasibility check: can we even complete this roster within budget?
+    const teamsUsedInit = new Set([captain.team, ...flexChosen.map(p=>p.team)]);
+    const minTotalCost = cheapestCompletionCost(pool, used, teamsUsedInit, flexNeeded);
+    if (minTotalCost > budgetLeft) return null; // truly infeasible, no point trying
+
     for (let i = 0; i < flexNeeded; i++) {
       const teamsUsed = new Set([captain.team, ...flexChosen.map(p=>p.team)]);
       const missingTeam = teams.find(t => !teamsUsed.has(t));
       const slotsLeftAfterThis = flexNeeded - i - 1;
 
-      const unusedSorted = candidates.filter(p => !used.has(p.name)).sort((a,b) => a.sal - b.sal);
-      const minForRest = unusedSorted.slice(0, slotsLeftAfterThis).reduce((sum, p) => sum + p.sal, 0);
-      const maxSpendNow = budgetLeft - minForRest;
-
-      let pick;
-      if (missingTeam && slotsLeftAfterThis === 0) {
-        pick = candidates.find(p => p.team === missingTeam && !used.has(p.name) && p.sal <= budgetLeft);
+      let pick = null;
+      // Try candidates in consensus order; accept the first one where the REMAINING
+      // slots are still completable within whatever budget is left after this pick.
+      for (const candidate of candidates) {
+        if (used.has(candidate.name)) continue;
+        if (candidate.sal > budgetLeft) continue;
+        const newUsed = new Set([...used, candidate.name]);
+        const newTeamsUsed = new Set([...teamsUsed, candidate.team]);
+        const budgetAfterPick = budgetLeft - candidate.sal;
+        const restMinCost = cheapestCompletionCost(pool, newUsed, newTeamsUsed, slotsLeftAfterThis);
+        if (restMinCost <= budgetAfterPick) { pick = candidate; break; }
       }
-      if (!pick) pick = candidates.find(p => !used.has(p.name) && p.sal <= maxSpendNow);
-      if (!pick) pick = candidates.find(p => !used.has(p.name) && p.sal <= budgetLeft);
       if (!pick) return null;
 
       flexChosen.push(pick);
