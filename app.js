@@ -25,11 +25,11 @@ function yesterdayISO() {
   return d.toISOString().split('T')[0];
 }
 
-function showAlert(id, msg, type = 'success') {
+function showAlert(id, msg, type = 'success', duration = 6000) {
   const el = g(id); if (!el) return;
   const icon = type === 'success' ? 'check' : type === 'danger' ? 'alert-circle' : 'info-circle';
   el.innerHTML = `<div class="alert ${type}"><i class="ti ti-${icon}"></i>${msg}</div>`;
-  setTimeout(() => { el.innerHTML = ''; }, 6000);
+  setTimeout(() => { el.innerHTML = ''; }, duration);
 }
 
 function showTab(name, el) {
@@ -1048,6 +1048,10 @@ function exportLineupDK() {
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `DK_cash_lineup_${todayISO()}.csv`;
   a.click();
+
+  showAlert('lineup-alert',
+    'Downloaded. If DK rejects this on upload, download DK\'s own template from the contest\'s "Upload Lineups" screen first and copy these names into its existing columns -- DK\'s bulk upload expects your Entry ID/Contest ID already present in the file.',
+    'info', 12000);
 }
 
 function resetLineupBuilder() {
@@ -1447,6 +1451,12 @@ function exportShowdown() {
   a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
   a.download = `${SITE}_showdown_cash_${todayISO()}.csv`;
   a.click();
+
+  showAlert('sd-alert',
+    `Downloaded. ${SITE} bulk upload requires DK's own template (with your Entry ID/Contest ID already filled in) -- ` +
+    `download that template from the contest's "Upload Lineups" screen first, then copy these player names into its existing player columns. ` +
+    `Don't upload this file as-is; DK will reject a header-only CSV without your Entry/Contest IDs.`,
+    'info', 12000);
 }
 
 function resetShowdownBuilder() {
