@@ -586,6 +586,22 @@ function parseLuStok(rows) {
   return out;
 }
 
+// Showdown-specific Stokastic export: includes Salary, Ownership %, CPT Ownership %
+// (different column set than the main-slate Data Hub export)
+function parseSdStok(rows) {
+  const out = {};
+  rows.forEach(r => {
+    const name = (r['player'] || r['Player'] || '').trim();
+    const proj = parseFloat(r['projection'] || r['Projection'] || 0) || 0;
+    const team = (r['team'] || r['Team'] || '').trim();
+    const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
+    const own  = parseFloat(r['ownership %'] || r['Ownership %'] || 0) || 0;
+    const cptOwn = parseFloat(r['cpt ownership %'] || r['CPT Ownership %'] || 0) || 0;
+    if (name) out[name] = { proj, team, sal, own, cptOwn };
+  });
+  return out;
+}
+
 function buildLineup() {
   if (!luData.sal || !luData.splash || !luData.stok) {
     showAlert('lineup-alert', 'Please upload all three files first.', 'info'); return;
@@ -1076,6 +1092,39 @@ function resetLineupBuilder() {
 const sdData = { sal: null, splash: null, stok: null };
 let sdPool = [];
 let sdLastFailReason = '';
+let sdMode = 'cash';
+
+function setSdMode(mode, btn) {
+  sdMode = mode;
+  document.querySelectorAll('.flag-btn[data-group="sd-mode"]').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+
+  const hint = g('sd-mode-hint');
+  const wtaSettings = g('sd-wta-settings');
+  const stokTag = g('sd-stok-tag');
+  const stokHint = g('sd-stok-hint');
+  const buildBtn = g('sd-build-btn');
+  const resultTitle = g('sd-result-title');
+  const captainBoard = g('sd-captain-board');
+
+  if (mode === 'wta') {
+    hint.textContent = 'WTA: Captain pick weighs ownership leverage, not just raw points -- needs Stokastic ownership data.';
+    wtaSettings.style.display = 'block';
+    stokTag.style.display = 'inline-block';
+    stokHint.textContent = 'Data Hub export, Showdown slate -- must include Ownership % and CPT Ownership % columns';
+    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build optimal WTA showdown';
+    resultTitle.textContent = 'Optimal WTA showdown lineup';
+  } else {
+    hint.textContent = 'Cash: highest-consensus Captain, no ownership consideration -- pure floor.';
+    wtaSettings.style.display = 'none';
+    stokTag.style.display = 'none';
+    stokHint.textContent = 'Data Hub export, Showdown slate';
+    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build optimal cash showdown';
+    resultTitle.textContent = 'Optimal cash showdown lineup';
+  }
+  captainBoard.style.display = 'none';
+}
+
 let sdLineup = [];
 
 let sdSplashSkipped = false;
@@ -1135,6 +1184,7 @@ function buildShowdown() {
   const salMap    = parseLuSalaries(sdData.sal);
   const splashMap = stokOnly ? {} : parseLuSplash(sdData.splash);
   const stokMap   = parseLuStok(sdData.stok);
+  const sdStokMap = sdMode === 'wta' ? parseSdStok(sdData.stok) : {};
 
   sdPool = [];
   const allNames = stokOnly
@@ -1150,18 +1200,27 @@ function buildShowdown() {
     team = team.toUpperCase();
     if (salData.sal === 0) return;
 
+    const ownEntry = sdStokMap[name];
+    const own = ownEntry ? ownEntry.own : null;
+    const cptOwn = ownEntry ? ownEntry.cptOwn : null;
+
     if (stokOnly) {
       // Stokastic-only: no second source, so "consensus" = Stokastic projection, diff = 0
       if (st === 0) return;
-      sdPool.push({ name, team, sal: salData.sal, sp: st, st, diff: 0, consensus: st });
+      sdPool.push({ name, team, sal: salData.sal, sp: st, st, diff: 0, consensus: st, own, cptOwn });
     } else {
       const sp = splashMap[name] || 0;
       if (sp === 0 || st === 0) return;
       const diff = Math.abs(sp - st);
       const consensus = (sp + st) / 2;
-      sdPool.push({ name, team, sal: salData.sal, sp, st, diff, consensus });
+      sdPool.push({ name, team, sal: salData.sal, sp, st, diff, consensus, own, cptOwn });
     }
   });
+
+  if (sdMode === 'wta' && sdPool.every(p => p.cptOwn === null)) {
+    showAlert('sd-alert', 'WTA mode needs ownership data. Make sure your Stokastic file includes "Ownership %" and "CPT Ownership %" columns (the showdown Data Hub export, not the main-slate one).', 'danger');
+    return;
+  }
 
   if (!sdPool.length) {
     showAlert('sd-alert', 'No matching players found across the uploaded files.', 'danger'); return;
@@ -1209,10 +1268,35 @@ function buildShowdown() {
   const consensusPool = sdPool.filter(p => p.diff <= MAX_DIFF);
   const eligiblePool  = sdPool;
 
+  // Rank captain candidates based on mode/strategy
+  function rankCaptainCandidates(pool) {
+    if (sdMode !== 'wta') {
+      return [...pool].sort((a,b) => b.consensus - a.consensus);
+    }
+    const strategy = gv('sd-wta-strategy') || 'value';
+    const maxCptOwn = parseFloat(gv('sd-max-cpt-own')) || 100;
+    const withOwn = pool.filter(p => p.cptOwn !== null && p.cptOwn !== undefined);
+    const eligible = withOwn.length ? withOwn.filter(p => p.cptOwn <= maxCptOwn) : pool;
+    const candidates = eligible.length ? eligible : pool;
+
+    if (strategy === 'chalk') {
+      return [...candidates].sort((a,b) => b.consensus - a.consensus);
+    }
+    if (strategy === 'contrarian') {
+      return [...candidates].sort((a,b) => (a.cptOwn ?? 100) - (b.cptOwn ?? 100));
+    }
+    // 'value': consensus*1.5 (captain pts) per 1% of CPT ownership, floor at 0.5 to avoid div-by-zero blowups
+    return [...candidates].sort((a,b) => {
+      const aVal = (a.consensus * 1.5) / Math.max(a.cptOwn ?? 1, 0.5);
+      const bVal = (b.consensus * 1.5) / Math.max(b.cptOwn ?? 1, 0.5);
+      return bVal - aVal;
+    });
+  }
+
   function tryBuildBestCaptain(pool) {
     if (lockedCpt) return tryBuildWithCaptain(pool, lockedCpt);
-    // No captain locked: try top N captains by consensus until one produces a feasible lineup
-    const sorted = [...pool].sort((a,b) => b.consensus - a.consensus);
+    // No captain locked: try top N captains by rank until one produces a feasible lineup
+    const sorted = rankCaptainCandidates(pool);
     for (const cptCandidate of sorted.slice(0, 8)) {
       const result = tryBuildWithCaptain(pool, cptCandidate);
       if (result) return result;
@@ -1320,6 +1404,43 @@ function buildShowdown() {
   renderShowdownResult(warnings, CAP, SITE);
   g('sd-result').style.display = 'block';
   renderSdPool();
+  if (sdMode === 'wta') renderCaptainBoard();
+}
+
+function renderCaptainBoard() {
+  const board = g('sd-captain-board');
+  const withOwn = sdPool.filter(p => p.cptOwn !== null && p.cptOwn !== undefined);
+  if (!withOwn.length) { board.style.display = 'none'; return; }
+
+  const sorted = [...withOwn].sort((a,b) => {
+    const aVal = (a.consensus * 1.5) / Math.max(a.cptOwn, 0.5);
+    const bVal = (b.consensus * 1.5) / Math.max(b.cptOwn, 0.5);
+    return bVal - aVal;
+  });
+
+  const usedCptName = sdLineup.find(p => p._slot === 'CPT' || p._slot === 'MVP')?.name;
+
+  const rows = sorted.slice(0, 15).map(p => {
+    const cptPts = p.consensus * 1.5;
+    const valPerOwn = cptPts / Math.max(p.cptOwn, 0.5);
+    const isUsed = p.name === usedCptName;
+    return `<tr style="${isUsed ? 'background:var(--green-light)' : ''}">
+      <td>${p.name}${isUsed ? ' <span style="font-size:10px;color:var(--green);font-weight:600">SELECTED</span>' : ''}</td>
+      <td>${p.team}</td>
+      <td style="text-align:right">${p.consensus.toFixed(2)}</td>
+      <td style="text-align:right">${cptPts.toFixed(2)}</td>
+      <td style="text-align:right">${p.cptOwn.toFixed(1)}%</td>
+      <td style="text-align:right"><strong>${valPerOwn.toFixed(2)}</strong></td>
+    </tr>`;
+  }).join('');
+
+  g('sd-captain-board-table').innerHTML = `<table>
+    <thead><tr>
+      <th>Player</th><th>Team</th><th>Consensus</th><th>CPT Pts</th><th>CPT Own%</th><th>Value/Own</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  board.style.display = 'block';
 }
 
 function renderShowdownResult(warnings, CAP, SITE) {
@@ -1470,6 +1591,7 @@ function resetShowdownBuilder() {
   });
   g('sd-settings-card').style.display = 'none';
   g('sd-result').style.display = 'none';
+  g('sd-captain-board').style.display = 'none';
   ['sd-lock-cpt','sd-lock-flex'].forEach(id => { const el = g(id); if (el) el.value = ''; });
   const teamSel = g('sd-pool-team');
   if (teamSel) teamSel.innerHTML = '<option value="">All teams</option>';
