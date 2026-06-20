@@ -218,6 +218,16 @@
     <!-- SHOWDOWN CASH BUILDER -->
     <div id="tab-showdown" class="section">
       <div id="sd-alert"></div>
+
+      <div class="card">
+        <div class="divider">Mode</div>
+        <div class="flag-row">
+          <button type="button" class="flag-btn selected" data-group="sd-mode" data-value="cash" onclick="setSdMode('cash',this)">Cash</button>
+          <button type="button" class="flag-btn" data-group="sd-mode" data-value="wta" onclick="setSdMode('wta',this)">Winner-Take-All / Satellite</button>
+        </div>
+        <p class="gpp-text" style="margin-top:.5rem" id="sd-mode-hint">Cash: highest-consensus Captain, no ownership consideration -- pure floor.</p>
+      </div>
+
       <div class="card">
         <div class="divider">Upload files</div>
         <div class="lu-upload-grid">
@@ -237,8 +247,8 @@
           </div>
           <div class="lu-upload-slot" id="sd-slot-stok">
             <i class="ti ti-file-spreadsheet"></i>
-            <div class="lu-slot-label">Stokastic Projections</div>
-            <div class="lu-slot-hint">Data Hub export, Showdown slate</div>
+            <div class="lu-slot-label">Stokastic Projections <span class="optional-tag" id="sd-stok-tag" style="display:none">needs ownership %</span></div>
+            <div class="lu-slot-hint" id="sd-stok-hint">Data Hub export, Showdown slate</div>
             <div class="lu-slot-status" id="sd-status-stok">Not uploaded</div>
             <input type="file" id="sd-file-stok" accept=".csv" onchange="handleSdFile('stok',this.files[0])">
           </div>
@@ -267,6 +277,35 @@
             <input type="number" id="sd-cap" value="50000" step="100">
           </div>
         </div>
+
+        <div id="sd-wta-settings" style="display:none">
+          <div class="divider">WTA captain selection</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Captain pick strategy</label>
+              <select id="sd-wta-strategy">
+                <option value="value">Best value-per-ownership (recommended)</option>
+                <option value="chalk">Chalk (highest projected, ignore ownership)</option>
+                <option value="contrarian">Most contrarian (lowest CPT own% above floor)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Max CPT ownership to consider (%)</label>
+              <input type="number" id="sd-max-cpt-own" value="10" step="1" min="0" max="100">
+            </div>
+          </div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field">
+              <label>Team stack lean</label>
+              <select id="sd-stack-lean">
+                <option value="balanced">Balanced (let consensus decide)</option>
+                <option value="4-2">4-2 lean (favor higher-total team)</option>
+                <option value="5-1">5-1 max stack</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div class="divider">Lock Captain / MVP (optional)</div>
         <div class="form-grid" style="margin-top:0">
           <div class="field">
@@ -279,16 +318,24 @@
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn primary" onclick="buildShowdown()"><i class="ti ti-wand"></i> Build optimal cash showdown</button>
+          <button class="btn primary" id="sd-build-btn" onclick="buildShowdown()"><i class="ti ti-wand"></i> Build optimal cash showdown</button>
           <button class="btn" onclick="resetShowdownBuilder()">Reset</button>
         </div>
       </div>
 
+      <div id="sd-captain-board" class="card" style="display:none">
+        <div class="divider">Captain candidates — value vs ownership</div>
+        <div class="table-wrap"><div id="sd-captain-board-table"></div></div>
+      </div>
+
       <div id="sd-result" style="display:none">
         <div class="card">
-          <div class="divider">Optimal cash showdown lineup</div>
+          <div class="divider" id="sd-result-title">Optimal cash showdown lineup</div>
           <div id="sd-lineup-table"></div>
           <div id="sd-warnings" style="margin-top:12px"></div>
+          <div class="hint-box" style="margin-top:1rem">
+            <strong>Upload note:</strong> DK's bulk upload needs its own downloaded template (with your Entry ID / Contest ID pre-filled) -- go to the contest's "Upload Lineups" screen, download that template, then paste these player names into its existing columns rather than uploading the exported file directly.
+          </div>
         </div>
         <div class="card">
           <div class="divider">Full consensus pool</div>
