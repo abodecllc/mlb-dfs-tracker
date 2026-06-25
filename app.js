@@ -136,6 +136,20 @@ function detectSite(headers) {
   return null;
 }
 
+function parseDKRoster(r) {
+  // DK entry history includes P1 Name ... P10 Name (or P1-P10 without space)
+  // MLB main slate slot order: P1=SP, P2=SP, P3=C, P4=1B, P5=2B, P6=3B, P7=SS, P8-P10=OF
+  const roster = [];
+  for (let i = 1; i <= 10; i++) {
+    const name = (r[`P${i} Name`] || r[`p${i} name`] || r[`P${i}Name`] || '').trim();
+    if (name) roster.push(name);
+  }
+  // SPs are slots 1 and 2 in DK MLB main slate
+  const sp1 = roster[0] || null;
+  const sp2 = roster[1] || null;
+  return { roster, sp1, sp2 };
+}
+
 function normalizeDK(rows) {
   return rows
     .filter(r => (r['sport'] || '').toUpperCase() === 'MLB')
@@ -151,7 +165,8 @@ function normalizeDK(rows) {
       const cashed     = placesPaid > 0 && rank !== null ? (rank <= placesPaid ? 'Y' : 'N') : (win > 0 ? 'Y' : 'N');
       const cls        = classifyContest(contest, null);
       const ctype      = contestType(contest, null);
-      return { contest, pts, rank, win, entries, fee, date, cashed, cls, ctype };
+      const { roster, sp1, sp2 } = parseDKRoster(r);
+      return { contest, pts, rank, win, entries, fee, date, cashed, cls, ctype, roster, sp1, sp2 };
     })
     .filter(r => r.contest);
 }
@@ -264,6 +279,9 @@ function confirmImport() {
       cashed:  r.cashed,
       win:     r.win,
       pl:      +(r.win - r.fee).toFixed(2),
+      roster:  r.roster || [],
+      sp1:     r.sp1 || null,
+      sp2:     r.sp2 || null,
     });
     added++;
   });
@@ -429,23 +447,32 @@ function renderHistory() {
     return;
   }
 
-  const rows = data.map(e => `<tr>
+  const hasSP = data.some(e => e.sp1);
+
+  const rows = data.map(e => {
+    const spCell = hasSP
+      ? `<td style="font-size:11px;color:var(--gray-300)">${[e.sp1, e.sp2].filter(Boolean).join(', ') || '-'}</td>`
+      : '';
+    return `<tr>
     <td>${e.date || '-'}</td>
     <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '-'}</span></td>
-    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
     <td><span class="badge ${e.cls === 'Cash' ? 'cash' : 'gpp'}">${e.cls || '-'}</span></td>
     <td>$${(e.fee||0).toFixed(2)}</td>
     <td>${e.pts != null ? e.pts.toFixed(1) : '-'}</td>
     <td>${e.rank || '-'}</td>
     <td>${e.cashed || '-'}</td>
     <td class="${(e.pl||0) >= 0 ? 'pos' : 'neg'}">${(e.pl||0) >= 0 ? '+' : ''}$${Math.abs(e.pl||0).toFixed(2)}</td>
+    ${spCell}
     <td><button class="btn danger" style="padding:4px 8px;font-size:11px" onclick="deleteEntry('${e.id}')"><i class="ti ti-trash"></i></button></td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 
+  const spHeader = hasSP ? '<th>SP(s)</th>' : '';
   g('hist-table').innerHTML = `<table>
     <thead><tr>
       <th>Date</th><th>Site</th><th>Contest</th><th>Class</th>
-      <th>Fee</th><th>Score</th><th>Rank</th><th>Cash</th><th>P/L</th><th></th>
+      <th>Fee</th><th>Score</th><th>Rank</th><th>Cash</th><th>P/L</th>${spHeader}<th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -460,10 +487,11 @@ function deleteEntry(id) {
 // - Export CSV -
 function exportCSV() {
   if (!entries.length) { alert('No entries to export.'); return; }
-  const h = ['Date','Site','Contest','Class','Contest Type','Fee','Score','Rank','Field Size','Cashed','Winnings','P/L'];
+  const h = ['Date','Site','Contest','Class','Contest Type','Fee','Score','Rank','Field Size','Cashed','Winnings','P/L','SP1','SP2'];
   const rows = entries.map(e => [
     e.date, e.site, e.contest, e.cls, e.ctype, e.fee,
     e.pts, e.rank, e.field, e.cashed, e.win, e.pl,
+    e.sp1 || '', e.sp2 || '',
   ].map(v => v == null ? '' : `"${String(v).replace(/"/g,'""')}"`));
   const csv = [h.join(','), ...rows.map(r => r.join(','))].join('\n');
   const a = document.createElement('a');
