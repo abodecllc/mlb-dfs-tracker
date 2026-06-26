@@ -895,6 +895,15 @@ function buildLineup() {
   }
 
   if (!bestCombo) {
+    console.log('BUILD FAILED diagnostic:');
+    console.log('luPool size:', luPool.length);
+    console.log('consensusPool size:', consensusPool.length);
+    console.log('eligiblePool size:', eligiblePool.length);
+    console.log('slotsToFill:', slotsToFill);
+    console.log('slotsNeeded:', slotsNeeded);
+    console.log('remaining budget:', remaining);
+    console.log('locked:', locked.map(p => p.name));
+    console.log('sample luPool[0]:', luPool[0]);
     showAlert('lineup-alert', 'Could not build a valid lineup - check salary cap, excluded teams, or locked players.', 'danger');
     return;
   }
