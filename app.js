@@ -802,11 +802,19 @@ function buildLineup() {
   const USE_BEAM_SEARCH = slotsToFill.length <= 8; // locks present -> budget likely constrained
 
   function minCostForSlots(pool, slotsArr, usedNames) {
-    return slotsArr.reduce((sum, pos) => {
-      const opts = pool.filter(p => eligibleFor(p, pos) && !usedNames.has(p.name));
-      const cheapest = opts.length ? Math.min(...opts.map(p => p.sal)) : Infinity;
-      return sum + cheapest;
-    }, 0);
+    // Must account for the fact each slot needs a DIFFERENT player.
+    // Greedily assign cheapest available player per slot in order,
+    // tracking which players have been "claimed" for earlier slots.
+    const tempUsed = new Set(usedNames);
+    let total = 0;
+    for (const pos of slotsArr) {
+      const opts = pool.filter(p => eligibleFor(p, pos) && !tempUsed.has(p.name))
+                       .sort((a,b) => a.sal - b.sal);
+      if (!opts.length) return Infinity;
+      total += opts[0].sal;
+      tempUsed.add(opts[0].name);
+    }
+    return total;
   }
 
   function beamSearch(slotsArr, startPool, budget) {
