@@ -798,7 +798,8 @@ function buildLineup() {
   // in-browser, but greedy-with-headroom is already close to optimal there since
   // the optimizer has full freedom to balance SP vs hitter spend itself.
 
-  const BEAM_WIDTH = 10;
+  const BEAM_WIDTH = 6;
+  const NODE_CAP = 200000;
   const USE_BEAM_SEARCH = slotsToFill.length <= 8; // locks present -> budget likely constrained
 
   function minCostForSlots(pool, slotsArr, usedNames) {
@@ -825,8 +826,13 @@ function buildLineup() {
     );
 
     let best = { total: -1, combo: null };
+    let nodes = 0;
+    let capped = false;
 
     function dfs(slotIdx, used, budgetLeft, chosen) {
+      if (capped) return;
+      nodes++;
+      if (nodes > NODE_CAP) { capped = true; return; }
       if (slotIdx === slotsArr.length) {
         const total = chosen.reduce((s, p) => s + p.consensus, 0);
         if (total > best.total) { best.total = total; best.combo = [...chosen]; }
@@ -837,6 +843,7 @@ function buildLineup() {
       if (minRest === Infinity) return;
 
       for (const p of candidatesPerSlot[slotIdx]) {
+        if (capped) return;
         if (used.has(p.name)) continue;
         if (p.sal > budgetLeft - minRest) continue;
         used.add(p.name);
@@ -848,6 +855,12 @@ function buildLineup() {
     }
 
     dfs(0, new Set(lockedNames), budget, []);
+
+    // If beam search was cut short or found nothing, fall back to greedy
+    if (!best.combo || capped) {
+      if (capped) warnings.push('Beam search exceeded node limit — using fast greedy optimizer instead. Result is near-optimal.');
+      return null; // signal caller to use greedy
+    }
     return best.combo;
   }
 
@@ -873,9 +886,11 @@ function buildLineup() {
   }
 
   function solve(slotsArr, startPool, budget) {
-    return USE_BEAM_SEARCH
-      ? beamSearch(slotsArr, startPool, budget)
-      : greedyWithHeadroom(slotsArr, startPool, budget);
+    if (USE_BEAM_SEARCH) {
+      const beamResult = beamSearch(slotsArr, startPool, budget);
+      if (beamResult) return beamResult;
+    }
+    return greedyWithHeadroom(slotsArr, startPool, budget);
   }
 
   // Sort slots: most constrained (fewest candidates) first - helps search prune faster
@@ -903,15 +918,6 @@ function buildLineup() {
   }
 
   if (!bestCombo) {
-    console.log('BUILD FAILED diagnostic:');
-    console.log('luPool size:', luPool.length);
-    console.log('consensusPool size:', consensusPool.length);
-    console.log('eligiblePool size:', eligiblePool.length);
-    console.log('slotsToFill:', slotsToFill);
-    console.log('slotsNeeded:', slotsNeeded);
-    console.log('remaining budget:', remaining);
-    console.log('locked:', locked.map(p => p.name));
-    console.log('sample luPool[0]:', luPool[0]);
     showAlert('lineup-alert', 'Could not build a valid lineup - check salary cap, excluded teams, or locked players.', 'danger');
     return;
   }
