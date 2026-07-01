@@ -577,9 +577,6 @@ function parseLuStok(rows) {
   const out = {};
   rows.forEach(r => {
     const name = (r['player'] || r['Player'] || r['name'] || '').trim();
-    // Handle two Stokastic export formats:
-    // 1. Classic Data Hub: Fpts, Roster Pos columns
-    // 2. Pre-Contest Sims / Projections export: Projection, Position columns
     const proj = parseFloat(
       r['fpts'] || r['Fpts'] ||
       r['projection'] || r['Projection'] || 0
@@ -589,7 +586,16 @@ function parseLuStok(rows) {
       r['roster pos'] || r['Roster Pos'] ||
       r['position'] || r['Position'] || ''
     ).trim();
-    if (name) out[name] = { proj, team, pos };
+    if (name) {
+      // Key by name+team so same-name players on different teams are kept separately.
+      // Also store by name alone as fallback for non-showdown files where duplicates don't occur.
+      const key = team ? `${name}|${team}` : name;
+      out[key] = { proj, team, pos };
+      // Name-only entry: prefer non-zero projection (handles showdown placeholder rows)
+      if (!out[name] || (out[name].proj === 0 && proj > 0)) {
+        out[name] = { proj, team, pos };
+      }
+    }
   });
   return out;
 }
@@ -605,7 +611,15 @@ function parseSdStok(rows) {
     const sal  = parseInt((r['salary'] || r['Salary'] || '0').replace(/[$,]/g,'')) || 0;
     const own  = parseFloat(r['ownership %'] || r['Ownership %'] || 0) || 0;
     const cptOwn = parseFloat(r['cpt ownership %'] || r['CPT Ownership %'] || 0) || 0;
-    if (name) out[name] = { proj, team, sal, own, cptOwn };
+    if (name) {
+      // Key by name+team to handle same-name players on different teams
+      const key = team ? `${name}|${team}` : name;
+      out[key] = { proj, team, sal, own, cptOwn };
+      // Name-only fallback: prefer non-zero projection row
+      if (!out[name] || (out[name].proj === 0 && proj > 0)) {
+        out[name] = { proj, team, sal, own, cptOwn };
+      }
+    }
   });
   return out;
 }
@@ -632,7 +646,9 @@ function buildLineup() {
     const salData  = salMap[name];
     if (!salData) return;
     const sp = splashMap[name] || 0;
-    const stEntry = stokMap[name];
+    // Look up by name+team first (handles same-name players on different teams in showdown files)
+    const teamKey = salData.team ? `${name}|${salData.team}` : name;
+    const stEntry = stokMap[teamKey] || stokMap[name];
     const st = stEntry ? stEntry.proj : 0;
     const team = salData.team || (stEntry ? stEntry.team : '');
     const pos  = salData.pos  || (stEntry ? stEntry.pos  : '');
@@ -1225,13 +1241,16 @@ function buildShowdown() {
   allNames.forEach(name => {
     const salData = salMap[name];
     if (!salData) return;
-    const stEntry = stokMap[name];
+    // Look up by name+team first to get the correct player when same name appears on both teams
+    const teamKey = salData.team ? `${name}|${salData.team}` : name;
+    const stEntry = stokMap[teamKey] || stokMap[name];
     const st = stEntry ? stEntry.proj : 0;
     let team = salData.team || (stEntry ? stEntry.team : '');
     team = team.toUpperCase();
     if (salData.sal === 0) return;
 
-    const ownEntry = sdStokMap[name];
+    const ownKey = salData.team ? `${name}|${salData.team}` : name;
+    const ownEntry = sdStokMap[ownKey] || sdStokMap[name];
     const own = ownEntry ? ownEntry.own : null;
     const cptOwn = ownEntry ? ownEntry.cptOwn : null;
 
