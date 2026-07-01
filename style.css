@@ -427,3 +427,6 @@ tr:hover td { background: var(--gray-50); }
 }
 .lu-upload-slot.skipped i { color: var(--gold); }
 .lu-upload-slot.skipped .lu-slot-status { color: var(--gold); }
+
+/* WTA badge */
+.badge.wta { background: var(--gold-light); color: var(--gold); }

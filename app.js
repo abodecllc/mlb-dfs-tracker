@@ -46,13 +46,13 @@ function showTab(name, el) {
 function classifyContest(name, opponent) {
   const n = (name || '').toLowerCase();
 
+  // WTA / Satellite — check before Cash since these are a distinct format
+  if (/\bsatellite\b/i.test(n) || /winner.?take.?all/i.test(n) || /\bwta\b/i.test(n)) return 'WTA';
+
   // FD: Opponent field is reliable - anything not "Tournament" is cash
   if (opponent && opponent.toLowerCase() !== 'tournament') return 'Cash';
 
   // DK: Only true cash contest is Double Up (top ~44-46% pay out)
-  // Everything else - Solo Shot, Chin Music, Pickoff, Four-Seamer,
-  // Hot Corner, Base Hit, Strike Three, Triple Up, Quintuple Up,
-  // Satellites, Winner Take All - are all GPP formats
   if (/double.?up/i.test(n)) return 'Cash';
 
   // FD cash names
@@ -66,6 +66,7 @@ function classifyContest(name, opponent) {
 // Finer-grained contest type label
 function contestType(name, opponent) {
   const n = (name || '').toLowerCase();
+  if (/\bsatellite\b/i.test(n) || /winner.?take.?all/i.test(n) || /\bwta\b/i.test(n)) return 'Satellite/WTA';
   if (/double.?up/i.test(n)) return 'Double Up';
   if (/\bbean ball\b/i.test(n)) return 'Double Up'; // FD
   if (/50.?50/i.test(n) || /fifty.?fifty/i.test(n)) return '50/50';
@@ -228,7 +229,7 @@ function renderPreview(rows, site) {
           ${preview.map(r => `<tr>
             <td>${r.date || '-'}</td>
             <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${r.contest}">${r.contest}</td>
-            <td><span class="badge ${r.cls === 'Cash' ? 'cash' : 'gpp'}">${r.cls}</span></td>
+            <td><span class="badge ${r.cls === 'Cash' ? 'cash' : r.cls === 'WTA' ? 'wta' : 'gpp'}">${r.cls}</span></td>
             <td>${r.pts.toFixed(1)}</td>
             <td>${r.rank || '-'}</td>
             <td>$${r.fee.toFixed(2)}</td>
@@ -342,17 +343,35 @@ function renderDashboard() {
   const cashWins = cash.filter(e => e.cashed === 'Y').length;
   const cashRate = cash.length > 0 ? cashWins / cash.length : null;
 
+  const wta      = all.filter(e => e.cls === 'WTA');
+  const wtaWins  = wta.filter(e => e.cashed === 'Y').length;
+  const wtaInv   = wta.reduce((a, e) => a + (e.invested || 0), 0);
+  const wtaWin   = wta.reduce((a, e) => a + (e.win || 0), 0);
+  const wtaROI   = wtaInv > 0 ? ((wtaWin - wtaInv) / wtaInv * 100).toFixed(1) : null;
+
+  const gpp      = all.filter(e => e.cls === 'GPP');
+  const gppInv   = gpp.reduce((a, e) => a + (e.invested || 0), 0);
+  const gppWin   = gpp.reduce((a, e) => a + (e.win || 0), 0);
+  const gppROI   = gppInv > 0 ? ((gppWin - gppInv) / gppInv * 100).toFixed(1) : null;
+
   g('kpi-grid').innerHTML = [
-    ['Total lineups',  all.length,                   '',                        ''],
-    ['Total invested', '$' + invested.toFixed(2),    '',                        ''],
-    ['Total winnings', '$' + winnings.toFixed(2),    '',                        ''],
-    ['Net P/L',        (pl >= 0 ? '+' : '-') + '$' + Math.abs(pl).toFixed(2),
-                       pl >= 0 ? 'pos' : 'neg',      ''],
-    ['Overall ROI',    (roi * 100).toFixed(1) + '%', roi >= 0 ? 'pos' : 'neg', ''],
+    ['Total lineups',   all.length,                                           '',                        ''],
+    ['Total invested',  '$' + invested.toFixed(2),                            '',                        ''],
+    ['Total winnings',  '$' + winnings.toFixed(2),                            '',                        ''],
+    ['Net P/L',         (pl >= 0 ? '+' : '-') + '$' + Math.abs(pl).toFixed(2), pl >= 0 ? 'pos' : 'neg', ''],
+    ['Overall ROI',     (roi * 100).toFixed(1) + '%',                         roi >= 0 ? 'pos' : 'neg', ''],
     ['Cash win rate',
       cashRate !== null ? (cashRate * 100).toFixed(0) + '%' : '-',
       cashRate !== null ? (cashRate >= 0.52 ? 'pos' : 'neg') : '',
-      cashRate !== null ? 'target -52%' : 'no cash lineups yet'],
+      cashRate !== null ? `${cash.length} entries · target 52%` : 'no cash lineups yet'],
+    ['GPP ROI',
+      gppROI !== null ? gppROI + '%' : '-',
+      gppROI !== null ? (parseFloat(gppROI) >= 0 ? 'pos' : 'neg') : '',
+      gppROI !== null ? `${gpp.length} entries` : 'no GPP lineups yet'],
+    ['WTA / Satellite',
+      wtaROI !== null ? wtaROI + '%' : '-',
+      wtaROI !== null ? (parseFloat(wtaROI) >= 0 ? 'pos' : 'neg') : '',
+      wtaROI !== null ? `${wta.length} entries · ${wtaWins} wins` : 'no WTA lineups yet'],
   ].map(([label, val, cls, sub]) =>
     `<div class="kpi">
       <div class="kpi-label">${label}</div>
@@ -402,17 +421,13 @@ function renderDashboard() {
 
   const clsMap  = bucket(e => e.cls);
   const siteMap = bucket(e => e.site);
-  const typeMap = bucket(e => {
-    // Group cash types, show GPP sub-types too
-    return e.ctype || e.cls || 'Unknown';
-  });
+  const typeMap = bucket(e => e.ctype || e.cls || 'Unknown');
 
-  // GPP vs Cash - show both overall metrics + cash-specific win rate target note
-  const gppVsCash = breakdownCard('GPP vs Cash', clsMap, ['GPP', 'Cash']);
+  const byClass   = breakdownCard('GPP / Cash / WTA', clsMap, ['GPP', 'Cash', 'WTA']);
   const bySite    = breakdownCard('By site', siteMap, ['DK', 'FD']);
-  const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Multiplier','Cash - Other']);
+  const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Satellite/WTA','Cash - Other']);
 
-  g('breakdown-grid').innerHTML = [gppVsCash, bySite, byType].filter(Boolean).join('') ||
+  g('breakdown-grid').innerHTML = [byClass, bySite, byType].filter(Boolean).join('') ||
     '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1;padding:1rem">Import results to see breakdowns.</p>';
 }
 
@@ -433,7 +448,7 @@ function renderHistory() {
     <td>${e.date || '-'}</td>
     <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '-'}</span></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
-    <td><span class="badge ${e.cls === 'Cash' ? 'cash' : 'gpp'}">${e.cls || '-'}</span></td>
+    <td><span class="badge ${e.cls === 'Cash' ? 'cash' : e.cls === 'WTA' ? 'wta' : 'gpp'}">${e.cls || '-'}</span></td>
     <td>$${(e.fee||0).toFixed(2)}</td>
     <td>${e.pts != null ? e.pts.toFixed(1) : '-'}</td>
     <td>${e.rank || '-'}</td>
