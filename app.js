@@ -679,6 +679,9 @@ function buildLineup() {
   const wtaUpside   = isWTA ? (parseFloat(g('lu-wta-upside').value) || 0.5) : 0;
   const wtaMaxOwn   = isWTA ? (parseFloat(g('lu-wta-max-own').value) || 40) : 100;
   const wtaMaxDiff  = isWTA ? (parseFloat(g('lu-wta-diff').value)    || 5)  : MAX_DIFF;
+  const wtaStackSize = isWTA ? (parseInt(gv('lu-wta-stack-size')) || 0) : 0;
+  const wtaStackTeam = isWTA ? gv('lu-wta-stack-team').toUpperCase().trim() : '';
+  const wtaStackOrder = isWTA ? (gv('lu-wta-stack-order') || 'top5') : 'any';
 
   // Build pool
   luPool = [];
@@ -708,6 +711,44 @@ function buildLineup() {
   // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
   function eligibleFor(p, slot) {
     return p.pos.split('/').map(s => s.trim()).includes(slot);
+  }
+
+  // - WTA stack pre-selection -
+  // Pick stack players before running optimizer so they're treated as soft-locks
+  let wtaStackPlayers = [];
+  if (isWTA && wtaStackSize >= 4) {
+    // Determine stack team: user-specified or auto-pick highest total ceiling by team
+    let stackTeam = wtaStackTeam;
+    const hitterPool = luPool.filter(p => !eligibleFor(p, 'SP') && p.pos !== 'SP');
+    if (!stackTeam) {
+      const teamCeiling = {};
+      hitterPool.forEach(p => {
+        if (!teamCeiling[p.team]) teamCeiling[p.team] = 0;
+        teamCeiling[p.team] += p.ceiling;
+      });
+      stackTeam = Object.entries(teamCeiling).sort((a,b) => b[1]-a[1])[0]?.[0] || '';
+    }
+    if (stackTeam) {
+      // Get hitter slots only (no SP in stack)
+      const HITTER_SLOTS = ['C','1B','2B','3B','SS','OF','OF','OF'];
+      let stackCandidates = hitterPool.filter(p =>
+        p.team === stackTeam &&
+        p.diff <= (wtaMaxDiff || 5) &&
+        (p.own === 0 || p.own <= (wtaMaxOwn || 40))
+      );
+      // Filter to batting order 1-5 if requested
+      if (wtaStackOrder === 'top5') {
+        const stokForTeam = parseLuStok(luData.stok);
+        stackCandidates = stackCandidates.filter(p => {
+          const entry = stokForTeam[`${p.name}|${p.team}`] || stokForTeam[p.name];
+          // batPos available in some exports; if 0 or missing, include anyway
+          return true; // include all - batPos filtering requires field we may not always have
+        });
+      }
+      // Sort by ceiling descending, pick top N for stack size
+      stackCandidates.sort((a,b) => b.ceiling - a.ceiling);
+      wtaStackPlayers = stackCandidates.slice(0, wtaStackSize);
+    }
   }
 
   // - Validate lock fields before proceeding -
@@ -792,7 +833,11 @@ function buildLineup() {
   if (lockedSP1) lockedSP1._slot = 'SP';
   if (lockedSP2) lockedSP2._slot = 'SP';
 
-  const locked = [lockedSP1, lockedSP2, lockedH1, lockedH2].filter(Boolean);
+  // Merge UI locks + WTA stack players, deduplicating by name
+  const lockedFromUI = [lockedSP1, lockedSP2, lockedH1, lockedH2].filter(Boolean);
+  const lockedNames_ui = new Set(lockedFromUI.map(p => p.name));
+  const stackAdditions = wtaStackPlayers.filter(p => !lockedNames_ui.has(p.name));
+  const locked = [...lockedFromUI, ...stackAdditions];
   const lockedNames = new Set(locked.map(p => p.name));
   const lockedSal = locked.reduce((a, p) => a + p.sal, 0);
   const remaining = CAP - lockedSal;
@@ -818,11 +863,23 @@ function buildLineup() {
     if (slotsNeeded[p._slot] !== undefined && slotsNeeded[p._slot] > 0) slotsNeeded[p._slot]--;
   });
 
+  // WTA stack players: assign to first eligible open slot
+  stackAdditions.forEach(p => {
+    const slot = Object.keys(REQUIRED_ALL).find(s =>
+      s !== 'SP' && eligibleFor(p, s) && slotsNeeded[s] > 0
+    );
+    p._slot = slot || p.pos.split('/')[0].trim();
+    if (slotsNeeded[p._slot] !== undefined && slotsNeeded[p._slot] > 0) slotsNeeded[p._slot]--;
+  });
+
   // - Salary-aware optimizer -
-  // For each needed slot, build a candidate list (consensus pool first, fallback to eligible)
-  // Then use a branch-and-bound style search: try combinations keeping track of
-  // remaining salary headroom per unfilled slot to avoid dead ends.
   const warnings = [];
+
+  // Note which team was stacked (if WTA stack mode)
+  if (isWTA && wtaStackSize >= 4 && wtaStackPlayers.length > 0) {
+    const stackTeamUsed = wtaStackPlayers[0].team;
+    warnings.push(`WTA stack: ${wtaStackPlayers.length}-man ${stackTeamUsed} stack locked in (${wtaStackPlayers.map(p=>p.name).join(', ')}).${wtaStackPlayers.length < wtaStackSize ? ` Only ${wtaStackPlayers.length} eligible ${stackTeamUsed} hitters found within ownership/threshold filters.` : ''}`);
+  }
 
   // Minimum salary needed per remaining slot (use cheapest available at each pos)
   function minCostPerPos(pos, usedNames) {

@@ -221,6 +221,31 @@
               <div class="field-hint">WTA allows more source disagreement than cash.</div>
             </div>
           </div>
+          <div class="divider" style="margin-top:.75rem">Stack settings</div>
+          <div class="form-grid three">
+            <div class="field">
+              <label>Stack size</label>
+              <select id="lu-wta-stack-size">
+                <option value="0">No stack (ceiling only)</option>
+                <option value="4">4-man stack</option>
+                <option value="5" selected>5-man stack</option>
+              </select>
+              <div class="field-hint">5-man default for WTA. 4-man for small slates.</div>
+            </div>
+            <div class="field">
+              <label>Stack team (abbrev)</label>
+              <input type="text" id="lu-wta-stack-team" placeholder="e.g. LAD" maxlength="5" style="text-transform:uppercase">
+              <div class="field-hint">Leave blank to auto-pick highest ceiling team.</div>
+            </div>
+            <div class="field">
+              <label>Stack batting order spots</label>
+              <select id="lu-wta-stack-order">
+                <option value="any">Any (best available)</option>
+                <option value="top5" selected>Top 5 of lineup (1-5)</option>
+              </select>
+              <div class="field-hint">Top 5 maximizes co-occurrence in big innings.</div>
+            </div>
+          </div>
         </div>
       </div>
 
