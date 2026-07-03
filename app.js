@@ -496,6 +496,28 @@ function renderAll() { renderDashboard(); renderHistory(); }
 const luData = { sal: null, splash: null, stok: null };
 let luPool = [];
 let luLineup = [];
+let luMode = 'cash';
+
+function setLuMode(mode, btn) {
+  luMode = mode;
+  document.querySelectorAll('.flag-btn[data-group="lu-mode"]').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const hint = g('lu-mode-hint');
+  const wtaSettings = g('lu-wta-settings');
+  const buildBtn = g('lu-build-btn');
+  const resultTitle = g('lu-result-title');
+  if (mode === 'wta') {
+    hint.textContent = 'WTA: optimizes for ceiling using Projection + (Std Dev x upside weight). Relaxes consensus threshold. Requires Stokastic Projections export with Std Dev and Ownership % columns.';
+    wtaSettings.style.display = 'block';
+    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build optimal WTA lineup';
+    if (resultTitle) resultTitle.textContent = 'Optimal WTA lineup';
+  } else {
+    hint.textContent = 'Cash: highest consensus floor lineup — both sources must agree within the disagreement threshold.';
+    wtaSettings.style.display = 'none';
+    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build optimal cash lineup';
+    if (resultTitle) resultTitle.textContent = 'Optimal cash lineup';
+  }
+}
 
 function handleLuFile(type, file) {
   if (!file) return;
@@ -601,14 +623,13 @@ function parseLuStok(rows) {
       r['roster pos'] || r['Roster Pos'] ||
       r['position'] || r['Position'] || ''
     ).trim();
+    const stdDev = parseFloat(r['std dev'] || r['Std Dev'] || 0) || 0;
+    const own    = parseFloat(r['ownership %'] || r['Ownership %'] || 0) || 0;
     if (name) {
-      // Key by name+team so same-name players on different teams are kept separately.
-      // Also store by name alone as fallback for non-showdown files where duplicates don't occur.
       const key = team ? `${name}|${team}` : name;
-      out[key] = { proj, team, pos };
-      // Name-only entry: prefer non-zero projection (handles showdown placeholder rows)
+      out[key] = { proj, team, pos, stdDev, own };
       if (!out[name] || (out[name].proj === 0 && proj > 0)) {
-        out[name] = { proj, team, pos };
+        out[name] = { proj, team, pos, stdDev, own };
       }
     }
   });
@@ -653,7 +674,13 @@ function buildLineup() {
   const splashMap = parseLuSplash(luData.splash);
   const stokMap   = parseLuStok(luData.stok);
 
-  // Build consensus pool
+  // WTA settings
+  const isWTA       = luMode === 'wta';
+  const wtaUpside   = isWTA ? (parseFloat(g('lu-wta-upside').value) || 0.5) : 0;
+  const wtaMaxOwn   = isWTA ? (parseFloat(g('lu-wta-max-own').value) || 40) : 100;
+  const wtaMaxDiff  = isWTA ? (parseFloat(g('lu-wta-diff').value)    || 5)  : MAX_DIFF;
+
+  // Build pool
   luPool = [];
   const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
 
@@ -661,17 +688,21 @@ function buildLineup() {
     const salData  = salMap[name];
     if (!salData) return;
     const sp = splashMap[name] || 0;
-    // Look up by name+team first (handles same-name players on different teams in showdown files)
     const teamKey = salData.team ? `${name}|${salData.team}` : name;
     const stEntry = stokMap[teamKey] || stokMap[name];
-    const st = stEntry ? stEntry.proj : 0;
-    const team = salData.team || (stEntry ? stEntry.team : '');
-    const pos  = salData.pos  || (stEntry ? stEntry.pos  : '');
+    const st      = stEntry ? stEntry.proj   : 0;
+    const stdDev  = stEntry ? stEntry.stdDev : 0;
+    const own     = stEntry ? stEntry.own    : 0;
+    const team    = salData.team || (stEntry ? stEntry.team : '');
+    const pos     = salData.pos  || (stEntry ? stEntry.pos  : '');
     if (sp === 0 || st === 0) return;
     if (salData.sal === 0) return;
     const diff      = Math.abs(sp - st);
     const consensus = (sp + st) / 2;
-    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus });
+    // WTA ceiling: bet on SplashPlay (less followed = more contrarian upside) + Stokastic Std Dev for volatility
+    // Cash ceiling: consensus (average of both sources) for floor stability
+    const ceiling   = sp + wtaUpside * stdDev;
+    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, stdDev, own });
   });
 
   // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
@@ -735,14 +766,19 @@ function buildLineup() {
   // Apply exclusions: user-specified teams
   const excludeTeams = new Set(excludeRaw);
 
-  // Filter pool: no excluded teams, consensus diff within threshold
+  // Filter pool: no excluded teams
   const eligiblePool = luPool.filter(p => {
     if (excludeTeams.has(p.team.toUpperCase())) return false;
+    if (isWTA && p.own > 0 && p.own > wtaMaxOwn) return false; // WTA: exclude high-owned chalk
     return true;
   });
 
-  // Separate consensus-only pool (diff <= MAX_DIFF) vs all eligible
-  const consensusPool = eligiblePool.filter(p => p.diff <= MAX_DIFF);
+  // In WTA mode use relaxed diff threshold; sort by ceiling not consensus
+  const activeMaxDiff = isWTA ? wtaMaxDiff : MAX_DIFF;
+  const consensusPool = eligiblePool.filter(p => p.diff <= activeMaxDiff);
+
+  // Scoring function: ceiling for WTA, consensus for cash
+  const score = p => isWTA ? p.ceiling : p.consensus;
 
   // For hitter locks, use user-specified slot if provided (overrides player's primary pos)
   const h1SlotOverride = gv('lu-lock-h1-pos');
@@ -801,11 +837,11 @@ function buildLineup() {
   function getCandidates(pos, usedNames, budgetRemaining) {
     const consensus = consensusPool.filter(p =>
       eligibleFor(p, pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
-    ).sort((a,b) => b.consensus - a.consensus);
+    ).sort((a,b) => score(b) - score(a));
     if (consensus.length) return consensus;
     return eligiblePool.filter(p =>
       eligibleFor(p, pos) && !usedNames.has(p.name) && p.sal <= budgetRemaining
-    ).sort((a,b) => b.consensus - a.consensus);
+    ).sort((a,b) => score(b) - score(a));
   }
 
   // Slots to fill in order (fill expensive/constrained positions first)
@@ -852,7 +888,7 @@ function buildLineup() {
   function beamSearch(slotsArr, startPool, budget) {
     const candidatesPerSlot = slotsArr.map(pos =>
       startPool.filter(p => eligibleFor(p, pos))
-               .sort((a, b) => b.consensus - a.consensus)
+               .sort((a, b) => score(b) - score(a))
                .slice(0, BEAM_WIDTH)
     );
 
@@ -865,7 +901,7 @@ function buildLineup() {
       nodes++;
       if (nodes > NODE_CAP) { capped = true; return; }
       if (slotIdx === slotsArr.length) {
-        const total = chosen.reduce((s, p) => s + p.consensus, 0);
+        const total = chosen.reduce((s, p) => s + score(p), 0);
         if (total > best.total) { best.total = total; best.combo = [...chosen]; }
         return;
       }
@@ -906,7 +942,7 @@ function buildLineup() {
       const budgetForThis = left - minRest;
       const cands = startPool
         .filter(p => eligibleFor(p, pos) && !used.has(p.name) && p.sal <= budgetForThis)
-        .sort((a, b) => b.consensus - a.consensus);
+        .sort((a, b) => score(b) - score(a));
       if (!cands.length) return null;
       const pick = cands[0];
       chosen.push(Object.assign(Object.create(Object.getPrototypeOf(pick)), pick, { _slot: pos }));
@@ -940,11 +976,13 @@ function buildLineup() {
     if (bestCombo) break;
     const result = solve(sortedSlots, tryPool, remaining);
     if (result) {
-      const total = result.reduce((a,p) => a + p.consensus, 0);
+      const total = result.reduce((a,p) => a + score(p), 0);
       if (total > bestTotal) { bestTotal = total; bestCombo = result; }
     }
     if (!bestCombo && tryPool === consensusPool) {
-      warnings.push('No consensus lineup found within budget - relaxing disagreement threshold.');
+      warnings.push(isWTA
+        ? 'No WTA lineup found within threshold - relaxing ownership/disagreement filters.'
+        : 'No consensus lineup found within budget - relaxing disagreement threshold.');
     }
   }
 
@@ -953,9 +991,12 @@ function buildLineup() {
     return;
   }
 
-  // Flag any players outside consensus threshold
+  // Flag players outside threshold
   bestCombo.forEach(p => {
-    if (p.diff > MAX_DIFF) warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts) - no better option was available.`);
+    if (isWTA && p.own > wtaMaxOwn && p.own > 0)
+      warnings.push(`${p.name} is above max ownership threshold (${p.own.toFixed(0)}% > ${wtaMaxOwn}%) - no better option available.`);
+    if (!isWTA && p.diff > MAX_DIFF)
+      warnings.push(`${p.name} is outside consensus threshold (diff: ${p.diff.toFixed(1)} pts) - no better option was available.`);
   });
 
   luLineup = [...locked, ...bestCombo];
@@ -981,7 +1022,7 @@ function buildLineup() {
     return (posOrder[sa] ?? 9) - (posOrder[sb] ?? 9);
   });
 
-  renderLineupResult(warnings, CAP, MAX_DIFF);
+  renderLineupResult(warnings, CAP, activeMaxDiff);
   g('lu-result').style.display = 'block';
   renderPool();
 }
@@ -991,13 +1032,28 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
   const totalSP   = luLineup.reduce((a, p) => a + p.sp, 0);
   const totalST   = luLineup.reduce((a, p) => a + p.st, 0);
   const totalCons = luLineup.reduce((a, p) => a + p.consensus, 0);
+  const totalCeil = luLineup.reduce((a, p) => a + (p.ceiling || p.consensus), 0);
   const under = CAP - totalSal;
+  const isWTA = luMode === 'wta';
 
   const posLabel = p => p._slot || p.pos.split('/')[0].trim();
 
   const rows = luLineup.map(p => {
-    const diffFlag = p.diff > MAX_DIFF
+    const diffFlag = (!isWTA && p.diff > MAX_DIFF)
       ? `<span style="color:var(--red);font-size:10px"> - diff ${p.diff.toFixed(1)}</span>` : '';
+    const ownFlag = (isWTA && p.own > 0)
+      ? `<span style="color:var(--gray-500);font-size:10px"> ${p.own.toFixed(0)}%own</span>` : '';
+    if (isWTA) {
+      return `<tr>
+        <td><strong>${posLabel(p)}</strong></td>
+        <td>${p.name}${ownFlag}</td>
+        <td>${p.team}</td>
+        <td style="text-align:right">$${p.sal.toLocaleString()}</td>
+        <td style="text-align:right">${p.consensus.toFixed(2)}</td>
+        <td style="text-align:right">${(p.stdDev||0).toFixed(2)}</td>
+        <td style="text-align:right"><strong>${(p.ceiling||p.consensus).toFixed(2)}</strong></td>
+      </tr>`;
+    }
     return `<tr>
       <td><strong>${posLabel(p)}</strong></td>
       <td>${p.name}${diffFlag}</td>
@@ -1013,37 +1069,30 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
   const capColor = under >= 0 ? 'var(--green)' : 'var(--red)';
   const capLabel = under >= 0 ? `$${under.toLocaleString()} under cap` : `$${Math.abs(under).toLocaleString()} OVER CAP`;
 
+  const thead = isWTA
+    ? `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Salary</th><th>Consensus</th><th>Std Dev</th><th>Ceiling</th></tr>`
+    : `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Salary</th><th>SplashPlay</th><th>Stokastic</th><th>Consensus</th><th>Diff</th></tr>`;
+
+  const tfoot = isWTA
+    ? `<tr style="font-weight:600;border-top:2px solid var(--gray-200)"><td colspan="3">TOTAL</td><td style="text-align:right">$${totalSal.toLocaleString()}</td><td style="text-align:right">${totalCons.toFixed(2)}</td><td></td><td style="text-align:right">${totalCeil.toFixed(2)}</td></tr>`
+    : `<tr style="font-weight:600;border-top:2px solid var(--gray-200)"><td colspan="3">TOTAL</td><td style="text-align:right">$${totalSal.toLocaleString()}</td><td style="text-align:right">${totalSP.toFixed(2)}</td><td style="text-align:right">${totalST.toFixed(2)}</td><td style="text-align:right">${totalCons.toFixed(2)}</td><td></td></tr>`;
+
   g('lu-lineup-table').innerHTML = `
     <table class="bd-table" style="font-size:13px">
-      <thead><tr>
-        <th style="text-align:left">Pos</th>
-        <th style="text-align:left">Player</th>
-        <th style="text-align:left">Team</th>
-        <th>Salary</th>
-        <th>SplashPlay</th>
-        <th>Stokastic</th>
-        <th>Consensus</th>
-        <th>Diff</th>
-      </tr></thead>
+      <thead>${thead}</thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr style="font-weight:600;border-top:2px solid var(--gray-200)">
-          <td colspan="3">TOTAL</td>
-          <td style="text-align:right">$${totalSal.toLocaleString()}</td>
-          <td style="text-align:right">${totalSP.toFixed(2)}</td>
-          <td style="text-align:right">${totalST.toFixed(2)}</td>
-          <td style="text-align:right">${totalCons.toFixed(2)}</td>
-          <td></td>
-        </tr>
-        <tr>
-          <td colspan="8" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td>
-        </tr>
+        ${tfoot}
+        <tr><td colspan="${isWTA ? 7 : 8}" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td></tr>
       </tfoot>
     </table>`;
 
+  const noWarnMsg = isWTA
+    ? 'No warnings - lineup built within WTA ceiling settings.'
+    : 'No warnings - all players within consensus threshold.';
   const warnHTML = warnings.length
     ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
-    : '<div style="font-size:12px;color:var(--gray-500)">No warnings - all players within consensus threshold.</div>';
+    : `<div style="font-size:12px;color:var(--gray-500)">${noWarnMsg}</div>`;
   g('lu-warnings').innerHTML = warnHTML;
 
   // Show export button

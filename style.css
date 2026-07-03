@@ -430,3 +430,10 @@ tr:hover td { background: var(--gray-50); }
 
 /* WTA badge */
 .badge.wta { background: var(--gold-light); color: var(--gold); }
+
+/* Field hint text */
+.field-hint {
+  font-size: 11px;
+  color: var(--gray-500);
+  margin-top: 3px;
+}

@@ -106,6 +106,16 @@
     <!-- ── CASH LINEUP BUILDER ── -->
     <div id="tab-lineup" class="section">
       <div id="lineup-alert"></div>
+
+      <div class="card">
+        <div class="divider">Mode</div>
+        <div class="flag-row">
+          <button type="button" class="flag-btn selected" data-group="lu-mode" data-value="cash" onclick="setLuMode('cash',this)">Cash</button>
+          <button type="button" class="flag-btn" data-group="lu-mode" data-value="wta" onclick="setLuMode('wta',this)">WTA / Satellite</button>
+        </div>
+        <p class="gpp-text" style="margin-top:.5rem" id="lu-mode-hint">Cash: highest consensus floor lineup — both sources must agree within the disagreement threshold.</p>
+      </div>
+
       <div class="card">
         <div class="divider">Upload files</div>
         <div class="lu-upload-grid">
@@ -187,14 +197,36 @@
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn primary" onclick="buildLineup()"><i class="ti ti-wand"></i> Build optimal cash lineup</button>
+          <button class="btn primary" id="lu-build-btn" onclick="buildLineup()"><i class="ti ti-wand"></i> Build optimal cash lineup</button>
           <button class="btn" onclick="resetLineupBuilder()">Reset</button>
+        </div>
+
+        <div id="lu-wta-settings" style="display:none">
+          <div class="divider">WTA ceiling settings</div>
+          <p class="gpp-text" style="margin-bottom:.75rem">WTA optimizes for ceiling using <strong>SplashPlay projection + (upside weight × Stokastic Std Dev)</strong>. SplashPlay has fewer subscribers so its higher projections represent genuine contrarian upside. Stokastic Std Dev captures player volatility. Requires Stokastic Pre-Contest Sims Projections export (includes Std Dev and Ownership % columns).</p>
+          <div class="form-grid three">
+            <div class="field">
+              <label>Upside weight (Std Dev multiplier)</label>
+              <input type="number" id="lu-wta-upside" value="0.5" step="0.1" min="0" max="2">
+              <div class="field-hint">Higher = more weight on ceiling. 0.5 recommended.</div>
+            </div>
+            <div class="field">
+              <label>Max ownership % per player</label>
+              <input type="number" id="lu-wta-max-own" value="40" step="5" min="0" max="100">
+              <div class="field-hint">Exclude heavily-owned chalk. 40% recommended.</div>
+            </div>
+            <div class="field">
+              <label>Relax consensus threshold to (pts)</label>
+              <input type="number" id="lu-wta-diff" value="5" step="0.5" min="0.5" max="20">
+              <div class="field-hint">WTA allows more source disagreement than cash.</div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div id="lu-result" style="display:none">
         <div class="card">
-          <div class="divider">Optimal cash lineup</div>
+          <div class="divider" id="lu-result-title">Optimal cash lineup</div>
           <div id="lu-lineup-table"></div>
           <div id="lu-warnings" style="margin-top:12px"></div>
         </div>
