@@ -625,11 +625,12 @@ function parseLuStok(rows) {
     ).trim();
     const stdDev = parseFloat(r['std dev'] || r['Std Dev'] || 0) || 0;
     const own    = parseFloat(r['ownership %'] || r['Ownership %'] || 0) || 0;
+    const batPos = parseInt(r['bat pos.'] || r['Bat Pos.'] || r['bat pos'] || 0) || 0;
     if (name) {
       const key = team ? `${name}|${team}` : name;
-      out[key] = { proj, team, pos, stdDev, own };
+      out[key] = { proj, team, pos, stdDev, own, batPos };
       if (!out[name] || (out[name].proj === 0 && proj > 0)) {
-        out[name] = { proj, team, pos, stdDev, own };
+        out[name] = { proj, team, pos, stdDev, own, batPos };
       }
     }
   });
@@ -696,6 +697,7 @@ function buildLineup() {
     const st      = stEntry ? stEntry.proj   : 0;
     const stdDev  = stEntry ? stEntry.stdDev : 0;
     const own     = stEntry ? stEntry.own    : 0;
+    const batPos  = stEntry ? stEntry.batPos : 0;
     const team    = salData.team || (stEntry ? stEntry.team : '');
     const pos     = salData.pos  || (stEntry ? stEntry.pos  : '');
     if (sp === 0 || st === 0) return;
@@ -705,7 +707,7 @@ function buildLineup() {
     // WTA ceiling: bet on SplashPlay (less followed = more contrarian upside) + Stokastic Std Dev for volatility
     // Cash ceiling: consensus (average of both sources) for floor stability
     const ceiling   = sp + wtaUpside * stdDev;
-    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, stdDev, own });
+    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, stdDev, own, batPos });
   });
 
   // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
@@ -736,14 +738,12 @@ function buildLineup() {
         p.diff <= (wtaMaxDiff || 5) &&
         (p.own === 0 || p.own <= (wtaMaxOwn || 40))
       );
-      // Filter to batting order 1-5 if requested
+      // Filter to batting order 1-5 if requested (batPos 0 = not in lineup / SP)
       if (wtaStackOrder === 'top5') {
-        const stokForTeam = parseLuStok(luData.stok);
-        stackCandidates = stackCandidates.filter(p => {
-          const entry = stokForTeam[`${p.name}|${p.team}`] || stokForTeam[p.name];
-          // batPos available in some exports; if 0 or missing, include anyway
-          return true; // include all - batPos filtering requires field we may not always have
-        });
+        const top5 = stackCandidates.filter(p => p.batPos >= 1 && p.batPos <= 5);
+        // Only apply filter if we have enough players; otherwise fall back to all confirmed
+        if (top5.length >= wtaStackSize) stackCandidates = top5;
+        else if (top5.length > 0) stackCandidates = top5; // use what we have even if fewer than stack size
       }
       // Sort by ceiling descending, pick top N for stack size
       stackCandidates.sort((a,b) => b.ceiling - a.ceiling);
@@ -1105,6 +1105,7 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
         <td><strong>${posLabel(p)}</strong></td>
         <td>${p.name}${ownFlag}</td>
         <td>${p.team}</td>
+        <td style="text-align:right">${p.batPos > 0 ? '#' + p.batPos : '-'}</td>
         <td style="text-align:right">$${p.sal.toLocaleString()}</td>
         <td style="text-align:right">${p.consensus.toFixed(2)}</td>
         <td style="text-align:right">${(p.stdDev||0).toFixed(2)}</td>
@@ -1127,11 +1128,11 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
   const capLabel = under >= 0 ? `$${under.toLocaleString()} under cap` : `$${Math.abs(under).toLocaleString()} OVER CAP`;
 
   const thead = isWTA
-    ? `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Salary</th><th>Consensus</th><th>Std Dev</th><th>Ceiling</th></tr>`
+    ? `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Bat#</th><th>Salary</th><th>Consensus</th><th>Std Dev</th><th>Ceiling</th></tr>`
     : `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Salary</th><th>SplashPlay</th><th>Stokastic</th><th>Consensus</th><th>Diff</th></tr>`;
 
   const tfoot = isWTA
-    ? `<tr style="font-weight:600;border-top:2px solid var(--gray-200)"><td colspan="3">TOTAL</td><td style="text-align:right">$${totalSal.toLocaleString()}</td><td style="text-align:right">${totalCons.toFixed(2)}</td><td></td><td style="text-align:right">${totalCeil.toFixed(2)}</td></tr>`
+    ? `<tr style="font-weight:600;border-top:2px solid var(--gray-200)"><td colspan="4">TOTAL</td><td style="text-align:right">$${totalSal.toLocaleString()}</td><td style="text-align:right">${totalCons.toFixed(2)}</td><td></td><td style="text-align:right">${totalCeil.toFixed(2)}</td></tr>`
     : `<tr style="font-weight:600;border-top:2px solid var(--gray-200)"><td colspan="3">TOTAL</td><td style="text-align:right">$${totalSal.toLocaleString()}</td><td style="text-align:right">${totalSP.toFixed(2)}</td><td style="text-align:right">${totalST.toFixed(2)}</td><td style="text-align:right">${totalCons.toFixed(2)}</td><td></td></tr>`;
 
   g('lu-lineup-table').innerHTML = `
@@ -1140,7 +1141,7 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
       <tbody>${rows}</tbody>
       <tfoot>
         ${tfoot}
-        <tr><td colspan="${isWTA ? 7 : 8}" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td></tr>
+        <tr><td colspan="${isWTA ? 8 : 8}" style="text-align:right;font-size:12px;color:${capColor};font-weight:600">${capLabel}</td></tr>
       </tfoot>
     </table>`;
 
