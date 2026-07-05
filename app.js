@@ -1088,12 +1088,12 @@ function buildLineup() {
     return (posOrder[sa] ?? 9) - (posOrder[sb] ?? 9);
   });
 
-  renderLineupResult(warnings, CAP, activeMaxDiff);
+  renderLineupResult(warnings, CAP, activeMaxDiff, wtaScoreMethod);
   g('lu-result').style.display = 'block';
   renderPool();
 }
 
-function renderLineupResult(warnings, CAP, MAX_DIFF) {
+function renderLineupResult(warnings, CAP, MAX_DIFF, wtaScoreMethod = 'value') {
   const totalSal  = luLineup.reduce((a, p) => a + p.sal, 0);
   const totalSP   = luLineup.reduce((a, p) => a + p.sp, 0);
   const totalST   = luLineup.reduce((a, p) => a + p.st, 0);
