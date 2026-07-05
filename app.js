@@ -680,9 +680,10 @@ function buildLineup() {
   const wtaUpside   = isWTA ? (parseFloat(g('lu-wta-upside').value) || 0.5) : 0;
   const wtaMaxOwn   = isWTA ? (parseFloat(g('lu-wta-max-own').value) || 40) : 100;
   const wtaMaxDiff  = isWTA ? (parseFloat(g('lu-wta-diff').value)    || 5)  : MAX_DIFF;
-  const wtaStackSize = isWTA ? (parseInt(gv('lu-wta-stack-size')) || 0) : 0;
-  const wtaStackTeam = isWTA ? gv('lu-wta-stack-team').toUpperCase().trim() : '';
-  const wtaStackOrder = isWTA ? (gv('lu-wta-stack-order') || 'top5') : 'any';
+  const wtaStackSize  = isWTA ? (parseInt(gv('lu-wta-stack-size')) || 0) : 0;
+  const wtaStackTeam  = isWTA ? gv('lu-wta-stack-team').toUpperCase().trim() : '';
+  const wtaStackStart = isWTA ? (parseInt(gv('lu-wta-stack-start')) || 1) : 1;
+  const wtaScoreMethod = isWTA ? (gv('lu-wta-score-method') || 'value') : 'ceiling';
 
   // Build pool
   luPool = [];
@@ -707,7 +708,9 @@ function buildLineup() {
     // WTA ceiling: bet on SplashPlay (less followed = more contrarian upside) + Stokastic Std Dev for volatility
     // Cash ceiling: consensus (average of both sources) for floor stability
     const ceiling   = sp + wtaUpside * stdDev;
-    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, stdDev, own, batPos });
+    // Value score: SplashPlay projection per $1k salary (penalizes expensive players)
+    const value     = salData.sal > 0 ? sp / (salData.sal / 1000) : 0;
+    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, value, stdDev, own, batPos });
   });
 
   // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
@@ -738,13 +741,17 @@ function buildLineup() {
         p.diff <= (wtaMaxDiff || 5) &&
         (p.own === 0 || p.own <= (wtaMaxOwn || 40))
       );
-      // Filter to batting order 1-5 if requested (batPos 0 = not in lineup / SP)
-      if (wtaStackOrder === 'top5') {
-        const top5 = stackCandidates.filter(p => p.batPos >= 1 && p.batPos <= 5);
-        // Only apply filter if we have enough players; otherwise fall back to all confirmed
-        if (top5.length >= wtaStackSize) stackCandidates = top5;
-        else if (top5.length > 0) stackCandidates = top5; // use what we have even if fewer than stack size
+      // Build the set of batting order spots for the stack using wraparound
+      // e.g. start=4, size=5 -> spots {4,5,6,7,8} but 9-man order so wrap: {4,5,6,7,8}
+      // e.g. start=8, size=5 -> {8,9,1,2,3}
+      const stackSpots = new Set();
+      for (let i = 0; i < wtaStackSize; i++) {
+        const spot = ((wtaStackStart - 1 + i) % 9) + 1;
+        stackSpots.add(spot);
       }
+      const withBatPos = stackCandidates.filter(p => p.batPos >= 1 && stackSpots.has(p.batPos));
+      // Only apply if we have enough; otherwise fall back to all available
+      if (withBatPos.length >= 2) stackCandidates = withBatPos;
       // Sort by ceiling descending, pick top N for stack size
       stackCandidates.sort((a,b) => b.ceiling - a.ceiling);
       wtaStackPlayers = stackCandidates.slice(0, wtaStackSize);
@@ -818,8 +825,10 @@ function buildLineup() {
   const activeMaxDiff = isWTA ? wtaMaxDiff : MAX_DIFF;
   const consensusPool = eligiblePool.filter(p => p.diff <= activeMaxDiff);
 
-  // Scoring function: ceiling for WTA, consensus for cash
-  const score = p => isWTA ? p.ceiling : p.consensus;
+  // Scoring function: value or ceiling for WTA, consensus for cash
+  const score = p => isWTA
+    ? (wtaScoreMethod === 'value' ? p.value : p.ceiling)
+    : p.consensus;
 
   // For hitter locks, use user-specified slot if provided (overrides player's primary pos)
   const h1SlotOverride = gv('lu-lock-h1-pos');
@@ -1101,15 +1110,17 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
     const ownFlag = (isWTA && p.own > 0)
       ? `<span style="color:var(--gray-500);font-size:10px"> ${p.own.toFixed(0)}%own</span>` : '';
     if (isWTA) {
+      const scoreVal = wtaScoreMethod === 'value' ? p.value.toFixed(2) : (p.ceiling||p.consensus).toFixed(2);
+      const scoreLabel = wtaScoreMethod === 'value' ? 'Value/1k' : 'Ceiling';
       return `<tr>
         <td><strong>${posLabel(p)}</strong></td>
         <td>${p.name}${ownFlag}</td>
         <td>${p.team}</td>
         <td style="text-align:right">${p.batPos > 0 ? '#' + p.batPos : '-'}</td>
         <td style="text-align:right">$${p.sal.toLocaleString()}</td>
-        <td style="text-align:right">${p.consensus.toFixed(2)}</td>
+        <td style="text-align:right">${p.sp.toFixed(2)}</td>
         <td style="text-align:right">${(p.stdDev||0).toFixed(2)}</td>
-        <td style="text-align:right"><strong>${(p.ceiling||p.consensus).toFixed(2)}</strong></td>
+        <td style="text-align:right"><strong>${scoreVal}</strong></td>
       </tr>`;
     }
     return `<tr>
@@ -1127,8 +1138,9 @@ function renderLineupResult(warnings, CAP, MAX_DIFF) {
   const capColor = under >= 0 ? 'var(--green)' : 'var(--red)';
   const capLabel = under >= 0 ? `$${under.toLocaleString()} under cap` : `$${Math.abs(under).toLocaleString()} OVER CAP`;
 
+  const scoreColLabel = (isWTA && wtaScoreMethod === 'value') ? 'Value/1k' : isWTA ? 'Ceiling' : 'Consensus';
   const thead = isWTA
-    ? `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Bat#</th><th>Salary</th><th>Consensus</th><th>Std Dev</th><th>Ceiling</th></tr>`
+    ? `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Bat#</th><th>Salary</th><th>SplashPlay</th><th>Std Dev</th><th>${scoreColLabel}</th></tr>`
     : `<tr><th style="text-align:left">Pos</th><th style="text-align:left">Player</th><th style="text-align:left">Team</th><th>Salary</th><th>SplashPlay</th><th>Stokastic</th><th>Consensus</th><th>Diff</th></tr>`;
 
   const tfoot = isWTA

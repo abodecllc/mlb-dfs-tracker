@@ -238,12 +238,20 @@
               <div class="field-hint">Leave blank to auto-pick highest ceiling team.</div>
             </div>
             <div class="field">
-              <label>Stack batting order spots</label>
-              <select id="lu-wta-stack-order">
-                <option value="any">Any (best available)</option>
-                <option value="top5" selected>Top 5 of lineup (1-5)</option>
+              <label>Start stack at bat order #</label>
+              <input type="number" id="lu-wta-stack-start" value="1" min="1" max="9" step="1">
+              <div class="field-hint">Stack wraps around order. e.g. start at 5 gets spots 5-9-1-2-3 for a 5-man.</div>
+            </div>
+          </div>
+          <div class="divider" style="margin-top:.75rem">WTA scoring method</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Rank players by</label>
+              <select id="lu-wta-score-method">
+                <option value="ceiling">Ceiling (SplashPlay proj + Std Dev upside)</option>
+                <option value="value" selected>Value (SplashPlay proj per $1k salary)</option>
               </select>
-              <div class="field-hint">Top 5 maximizes co-occurrence in big innings.</div>
+              <div class="field-hint">Value penalizes expensive players with similar projections (e.g. high-priced catchers). Ceiling ignores salary efficiency.</div>
             </div>
           </div>
         </div>
