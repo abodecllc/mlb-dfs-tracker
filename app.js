@@ -669,6 +669,7 @@ function buildLineup() {
   const CAP       = parseInt(gv('lu-cap')) || 50000;
   const MAX_DIFF  = parseFloat(g('lu-max-diff').value) || 2.5;
   const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+  const excludePlayersRaw = gv('lu-exclude-players').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
   // Parse all three sources first so we can validate locks
   const salMap    = parseLuSalaries(luData.sal);
@@ -811,12 +812,13 @@ function buildLineup() {
     gv('lu-lock-h1'),  gv('lu-lock-h2'),
   ].filter(Boolean).map(s => s.trim().toLowerCase());
 
-  // Apply exclusions: user-specified teams
+  // Apply exclusions: user-specified teams and players
   const excludeTeams = new Set(excludeRaw);
 
-  // Filter pool: no excluded teams
+  // Filter pool: no excluded teams, no excluded players
   const eligiblePool = luPool.filter(p => {
     if (excludeTeams.has(p.team.toUpperCase())) return false;
+    if (excludePlayersRaw.some(ex => p.name.toLowerCase().includes(ex))) return false;
     if (isWTA && p.own > 0 && p.own > wtaMaxOwn) return false; // WTA: exclude high-owned chalk
     return true;
   });
@@ -1184,8 +1186,12 @@ function renderPool() {
   const MAX_DIFF   = parseFloat(g('lu-max-diff').value) || 2.5;
   const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
   const excludeTeams = new Set(excludeRaw);
+  const exPlayers = gv('lu-exclude-players').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
-  let data = [...luPool].filter(p => !excludeTeams.has(p.team.toUpperCase()));
+  let data = [...luPool].filter(p =>
+    !excludeTeams.has(p.team.toUpperCase()) &&
+    !exPlayers.some(ex => p.name.toLowerCase().includes(ex))
+  );
   if (posFilter) data = data.filter(p => p.pos && p.pos.includes(posFilter));
   data.sort((a, b) => {
     if (sortBy === 'diff')    return a.diff - b.diff;
@@ -1261,7 +1267,7 @@ function resetLineupBuilder() {
   });
   g('lu-settings-card').style.display = 'none';
   g('lu-result').style.display = 'none';
-  ['lu-lock-sp1','lu-lock-sp2','lu-lock-h1','lu-lock-h2','lu-exclude-teams'].forEach(id => {
+  ['lu-lock-sp1','lu-lock-sp2','lu-lock-h1','lu-lock-h2','lu-exclude-teams','lu-exclude-players'].forEach(id => {
     const el = g(id); if(el) el.value = '';
   });
 }
@@ -1357,9 +1363,10 @@ function buildShowdown() {
   const CAP      = parseInt(gv('sd-cap')) || 50000;
   const MAX_DIFF = parseFloat(g('sd-max-diff').value) || 2.5;
   const ROSTER_SIZE = SITE === 'FD' ? 5 : 6;
-  const CPT_MULT_SAL  = SITE === 'FD' ? 1 : 1.5; // FD MVP salary same as FLEX, DK CPT costs 1.5x
+  const CPT_MULT_SAL  = SITE === 'FD' ? 1 : 1.5;
   const CPT_MULT_PTS  = SITE === 'FD' ? 2 : 1.5;
   const stokOnly = sdSplashSkipped || !sdData.splash;
+  const sdExcludePlayersRaw = gv('sd-exclude-players').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
 
   // Parse sources (reuse main cash builder parsers)
   const salMap    = parseLuSalaries(sdData.sal);
@@ -1449,8 +1456,13 @@ function buildShowdown() {
   const lockedFlex = findSdPlayer(flexInput);
 
   // Build eligible pool: apply consensus filter
-  const consensusPool = sdPool.filter(p => p.diff <= MAX_DIFF);
-  const eligiblePool  = sdPool;
+  // Apply player exclusions (partial name match)
+  const sdAvailablePool = sdExcludePlayersRaw.length
+    ? sdPool.filter(p => !sdExcludePlayersRaw.some(ex => p.name.toLowerCase().includes(ex)))
+    : sdPool;
+
+  const consensusPool = sdAvailablePool.filter(p => p.diff <= MAX_DIFF);
+  const eligiblePool  = sdAvailablePool;
 
   // Rank captain candidates based on mode/strategy
   function rankCaptainCandidates(pool) {
@@ -1776,7 +1788,7 @@ function resetShowdownBuilder() {
   g('sd-settings-card').style.display = 'none';
   g('sd-result').style.display = 'none';
   g('sd-captain-board').style.display = 'none';
-  ['sd-lock-cpt','sd-lock-flex'].forEach(id => { const el = g(id); if (el) el.value = ''; });
+  ['sd-lock-cpt','sd-lock-flex','sd-exclude-players'].forEach(id => { const el = g(id); if (el) el.value = ''; });
   const teamSel = g('sd-pool-team');
   if (teamSel) teamSel.innerHTML = '<option value="">All teams</option>';
 }

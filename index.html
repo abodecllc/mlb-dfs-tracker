@@ -159,6 +159,13 @@
             <input type="text" id="lu-exclude-teams" placeholder="e.g. CHC, NYY">
           </div>
         </div>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label>Exclude players (comma separated)</label>
+            <input type="text" id="lu-exclude-players" placeholder="e.g. Hunter Goodman, Shane Bieber">
+            <div class="field-hint">Exact or partial name match. Useful for fading chalk or risky players.</div>
+          </div>
+        </div>
         <div class="divider">Lock players (optional)</div>
         <div class="form-grid" style="margin-top:0">
           <div class="field">
@@ -371,8 +378,15 @@
           </div>
         </div>
 
-        <div class="divider">Lock Captain / MVP (optional)</div>
+        <div class="divider">Exclude / Lock players</div>
         <div class="form-grid" style="margin-top:0">
+          <div class="field">
+            <label>Exclude players (comma separated)</label>
+            <input type="text" id="sd-exclude-players" placeholder="e.g. Dylan Cease, Hunter Goodman">
+            <div class="field-hint">Partial name match. In WTA showdown, use this to fade a pitcher and stack their opponents instead.</div>
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:12px">
           <div class="field">
             <label>Lock Captain / MVP</label>
             <input type="text" id="sd-lock-cpt" placeholder="Player name">
