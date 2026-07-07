@@ -1177,6 +1177,43 @@ function renderLineupResult(warnings, CAP, MAX_DIFF, wtaScoreMethod = 'value') {
   btn.innerHTML = '<i class="ti ti-download"></i> Export for DK upload';
   btn.onclick = exportLineupDK;
   g('lu-lineup-table').after(btn);
+
+  // Render SplashPlay edge table (cash mode only, when both sources available)
+  if (!isWTA) renderEdgeTable('lu-edge-card', 'lu-edge-table', luPool);
+  else { const ec = g('lu-edge-card'); if (ec) ec.style.display = 'none'; }
+}
+
+function renderEdgeTable(cardId, tableId, pool) {
+  const card = g(cardId);
+  const table = g(tableId);
+  if (!card || !table) return;
+
+  // Players where SplashPlay > Stokastic by at least 1 point — sorted by gap descending
+  const edgePlays = pool
+    .filter(p => p.sp > 0 && p.st > 0 && (p.sp - p.st) >= 1.0)
+    .sort((a,b) => (b.sp - b.st) - (a.sp - a.st))
+    .slice(0, 15);
+
+  if (!edgePlays.length) { card.style.display = 'none'; return; }
+
+  const rows = edgePlays.map(p => {
+    const gap = p.sp - p.st;
+    return `<tr>
+      <td>${p.pos}</td>
+      <td><strong>${p.name}</strong></td>
+      <td>${p.team}</td>
+      <td style="text-align:right">$${p.sal.toLocaleString()}</td>
+      <td style="text-align:right">${p.sp.toFixed(2)}</td>
+      <td style="text-align:right">${p.st.toFixed(2)}</td>
+      <td style="text-align:right;color:var(--green);font-weight:600">+${gap.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  table.innerHTML = `<table>
+    <thead><tr><th>Pos</th><th>Player</th><th>Team</th><th>Salary</th><th>SplashPlay</th><th>Stokastic</th><th>SP Edge</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  card.style.display = 'block';
 }
 
 function renderPool() {
@@ -1597,7 +1634,7 @@ function buildShowdown() {
   }
 
   sdLineup = result;
-  renderShowdownResult(warnings, CAP, SITE);
+  renderShowdownResult(warnings, CAP, SITE, stokOnly);
   g('sd-result').style.display = 'block';
   renderSdPool();
   if (sdMode === 'wta') renderCaptainBoard();
@@ -1639,7 +1676,7 @@ function renderCaptainBoard() {
   board.style.display = 'block';
 }
 
-function renderShowdownResult(warnings, CAP, SITE) {
+function renderShowdownResult(warnings, CAP, SITE, stokOnly = false) {
   const totalSal = sdLineup.reduce((a,p) => a + p._cost, 0);
   const totalSP  = sdLineup.reduce((a,p) => a + p.sp * (p._slot === 'CPT' || p._slot === 'MVP' ? (SITE === 'FD' ? 2 : 1.5) : 1), 0);
   const totalST  = sdLineup.reduce((a,p) => a + p.st * (p._slot === 'CPT' || p._slot === 'MVP' ? (SITE === 'FD' ? 2 : 1.5) : 1), 0);
@@ -1694,6 +1731,13 @@ function renderShowdownResult(warnings, CAP, SITE) {
   g('sd-warnings').innerHTML = warnings.length
     ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
     : '<div style="font-size:12px;color:var(--gray-500)">No warnings -- all players within consensus threshold.</div>';
+
+  // Render SplashPlay edge table when both sources available
+  if (!stokOnly && sdPool.some(p => p.sp > 0 && p.st > 0)) {
+    renderEdgeTable('sd-edge-card', 'sd-edge-table', sdPool);
+  } else {
+    const ec = g('sd-edge-card'); if (ec) ec.style.display = 'none';
+  }
 }
 
 function renderSdPool() {

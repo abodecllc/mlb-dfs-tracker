@@ -203,11 +203,6 @@
             </select>
           </div>
         </div>
-        <div class="btn-row">
-          <button class="btn primary" id="lu-build-btn" onclick="buildLineup()"><i class="ti ti-wand"></i> Build optimal cash lineup</button>
-          <button class="btn" onclick="resetLineupBuilder()">Reset</button>
-        </div>
-
         <div id="lu-wta-settings" style="display:none">
           <div class="divider">WTA ceiling settings</div>
           <p class="gpp-text" style="margin-bottom:.75rem">WTA optimizes for ceiling using <strong>SplashPlay projection + (upside weight × Stokastic Std Dev)</strong>. SplashPlay has fewer subscribers so its higher projections represent genuine contrarian upside. Stokastic Std Dev captures player volatility. Requires Stokastic Pre-Contest Sims Projections export (includes Std Dev and Ownership % columns).</p>
@@ -262,6 +257,10 @@
             </div>
           </div>
         </div>
+        <div class="btn-row" style="margin-top:1rem">
+          <button class="btn primary" id="lu-build-btn" onclick="buildLineup()"><i class="ti ti-wand"></i> Build optimal cash lineup</button>
+          <button class="btn" onclick="resetLineupBuilder()">Reset</button>
+        </div>
       </div>
 
       <div id="lu-result" style="display:none">
@@ -269,6 +268,11 @@
           <div class="divider" id="lu-result-title">Optimal cash lineup</div>
           <div id="lu-lineup-table"></div>
           <div id="lu-warnings" style="margin-top:12px"></div>
+        </div>
+        <div class="card" id="lu-edge-card" style="display:none">
+          <div class="divider">SplashPlay edge — lock candidates</div>
+          <p class="gpp-text" style="margin-bottom:.75rem">Players where SplashPlay projects significantly higher than Stokastic. These are your differentiation opportunities — the field (Stokastic-optimizer-heavy) will underown them. Consider locking 1-2 of these to get off the chalk field.</p>
+          <div class="table-wrap"><div id="lu-edge-table"></div></div>
         </div>
         <div class="card">
           <div class="divider">Full consensus pool</div>
@@ -415,6 +419,11 @@
           <div class="hint-box" style="margin-top:1rem">
             <strong>Upload note:</strong> DK's bulk upload needs its own downloaded template (with your Entry ID / Contest ID pre-filled) -- go to the contest's "Upload Lineups" screen, download that template, then paste these player names into its existing columns rather than uploading the exported file directly.
           </div>
+        </div>
+        <div class="card" id="sd-edge-card" style="display:none">
+          <div class="divider">SplashPlay edge — lock candidates</div>
+          <p class="gpp-text" style="margin-bottom:.75rem">Players where SplashPlay projects significantly higher than Stokastic. The Stokastic-optimizer-heavy field will underown these. Consider locking 1-2 for differentiation.</p>
+          <div class="table-wrap"><div id="sd-edge-table"></div></div>
         </div>
         <div class="card">
           <div class="divider">Full consensus pool</div>
