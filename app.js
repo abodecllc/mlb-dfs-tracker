@@ -1070,43 +1070,50 @@ function buildLineup() {
 
   luLineup = [...locked, ...bestCombo];
 
-  // WTA minimum salary enforcement: upgrade cheapest non-locked slots if total is below threshold
+  // WTA minimum salary enforcement: upgrade cheapest non-locked slots while
+  // there are better-scoring players available within budget.
+  // Minimum salary acts as a floor, not a target — keep upgrading past it.
   if (isWTA && wtaMinSal > 0) {
-    let totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
-    const lockedSet = new Set(locked.map(p => p.name));
-
-    while (totalSal < wtaMinSal) {
-      const deficit = wtaMinSal - totalSal;
-      // Find the cheapest non-locked player and try to upgrade them
+    let improved = true;
+    while (improved) {
+      improved = false;
+      let totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+      const lockedSet = new Set(locked.map(p => p.name));
       const nonLocked = luLineup.filter(p => !lockedSet.has(p.name)).sort((a,b) => a.sal - b.sal);
-      if (!nonLocked.length) break;
-      const toReplace = nonLocked[0];
-      const slot = toReplace._slot || toReplace.pos.split('/')[0].trim();
-      const usedNames = new Set(luLineup.map(p => p.name));
-      usedNames.delete(toReplace.name);
 
-      // Find best upgrade: higher salary, same score or better, fits the slot
-      const upgrade = luPool
-        .filter(p =>
-          eligibleFor(p, slot) &&
-          !usedNames.has(p.name) &&
-          p.sal > toReplace.sal &&
-          p.sal <= toReplace.sal + deficit + (CAP - totalSal) &&
-          p.diff <= (isWTA ? wtaMaxDiff : MAX_DIFF) &&
-          (p.own === 0 || p.own <= (isWTA ? wtaMaxOwn : 100))
-        )
-        .sort((a,b) => score(b) - score(a))[0];
+      for (const toReplace of nonLocked) {
+        const slot = toReplace._slot || toReplace.pos.split('/')[0].trim();
+        const usedNames = new Set(luLineup.map(p => p.name));
+        usedNames.delete(toReplace.name);
+        const budgetLeft = CAP - totalSal + toReplace.sal;
 
-      if (!upgrade) break; // no upgrade possible
-      const idx = luLineup.findIndex(p => p.name === toReplace.name);
-      upgrade._slot = slot;
-      luLineup[idx] = upgrade;
-      totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+        // Find best upgrade: higher salary (if below min) OR better score (if at/above min)
+        const belowMin = totalSal < wtaMinSal;
+        const upgrade = luPool
+          .filter(p =>
+            eligibleFor(p, slot) &&
+            !usedNames.has(p.name) &&
+            p.sal <= budgetLeft &&
+            p.sal !== toReplace.sal &&
+            p.diff <= (isWTA ? wtaMaxDiff : MAX_DIFF) &&
+            (p.own === 0 || p.own <= (isWTA ? wtaMaxOwn : 100)) &&
+            (belowMin ? p.sal > toReplace.sal : score(p) > score(toReplace))
+          )
+          .sort((a,b) => belowMin ? b.sal - a.sal : score(b) - score(a))[0];
+
+        if (upgrade) {
+          const idx = luLineup.findIndex(p => p.name === toReplace.name);
+          upgrade._slot = slot;
+          luLineup[idx] = upgrade;
+          improved = true;
+          break; // restart the loop with updated lineup
+        }
+      }
     }
 
     const finalSal = luLineup.reduce((a,p) => a + p.sal, 0);
     if (finalSal < wtaMinSal) {
-      warnings.push(`Lineup total $${finalSal.toLocaleString()} is below minimum $${wtaMinSal.toLocaleString()} — no valid upgrades found within ownership/threshold filters.`);
+      warnings.push(`Lineup total $${finalSal.toLocaleString()} is below minimum $${wtaMinSal.toLocaleString()} — no better upgrades found within ownership/threshold filters.`);
     }
   }
 
