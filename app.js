@@ -685,6 +685,7 @@ function buildLineup() {
   const wtaStackTeam  = isWTA ? gv('lu-wta-stack-team').toUpperCase().trim() : '';
   const wtaStackStart = isWTA ? (parseInt(gv('lu-wta-stack-start')) || 1) : 1;
   const wtaScoreMethod = isWTA ? (gv('lu-wta-score-method') || 'value') : 'ceiling';
+  const wtaMinSal = isWTA ? (parseInt(gv('lu-wta-min-sal')) || 47000) : 0;
 
   // Build pool
   luPool = [];
@@ -1068,6 +1069,46 @@ function buildLineup() {
   });
 
   luLineup = [...locked, ...bestCombo];
+
+  // WTA minimum salary enforcement: upgrade cheapest non-locked slots if total is below threshold
+  if (isWTA && wtaMinSal > 0) {
+    let totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+    const lockedSet = new Set(locked.map(p => p.name));
+
+    while (totalSal < wtaMinSal) {
+      const deficit = wtaMinSal - totalSal;
+      // Find the cheapest non-locked player and try to upgrade them
+      const nonLocked = luLineup.filter(p => !lockedSet.has(p.name)).sort((a,b) => a.sal - b.sal);
+      if (!nonLocked.length) break;
+      const toReplace = nonLocked[0];
+      const slot = toReplace._slot || toReplace.pos.split('/')[0].trim();
+      const usedNames = new Set(luLineup.map(p => p.name));
+      usedNames.delete(toReplace.name);
+
+      // Find best upgrade: higher salary, same score or better, fits the slot
+      const upgrade = luPool
+        .filter(p =>
+          eligibleFor(p, slot) &&
+          !usedNames.has(p.name) &&
+          p.sal > toReplace.sal &&
+          p.sal <= toReplace.sal + deficit + (CAP - totalSal) &&
+          p.diff <= (isWTA ? wtaMaxDiff : MAX_DIFF) &&
+          (p.own === 0 || p.own <= (isWTA ? wtaMaxOwn : 100))
+        )
+        .sort((a,b) => score(b) - score(a))[0];
+
+      if (!upgrade) break; // no upgrade possible
+      const idx = luLineup.findIndex(p => p.name === toReplace.name);
+      upgrade._slot = slot;
+      luLineup[idx] = upgrade;
+      totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+    }
+
+    const finalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+    if (finalSal < wtaMinSal) {
+      warnings.push(`Lineup total $${finalSal.toLocaleString()} is below minimum $${wtaMinSal.toLocaleString()} — no valid upgrades found within ownership/threshold filters.`);
+    }
+  }
 
   // Safety net: count slots and warn if wrong
   const REQUIRED = { SP: 2, C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 3 };
