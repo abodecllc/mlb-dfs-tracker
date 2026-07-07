@@ -890,7 +890,7 @@ function buildLineup() {
   // Note which team was stacked (if WTA stack mode)
   if (isWTA && wtaStackSize >= 4 && wtaStackPlayers.length > 0) {
     const stackTeamUsed = wtaStackPlayers[0].team;
-    warnings.push(`WTA stack: ${wtaStackPlayers.length}-man ${stackTeamUsed} stack locked in (${wtaStackPlayers.map(p=>p.name).join(', ')}).${wtaStackPlayers.length < wtaStackSize ? ` Only ${wtaStackPlayers.length} eligible ${stackTeamUsed} hitters found within ownership/threshold filters.` : ''}`);
+    warnings.push(`WTA stack: ${wtaStackPlayers.length}-man ${stackTeamUsed} stack locked in (${wtaStackPlayers.map(p=>p.name).join(', ')}).${wtaStackPlayers.length < wtaStackSize ? ` Only ${wtaStackPlayers.length} of ${wtaStackSize} requested ${stackTeamUsed} hitters could be assigned valid roster slots (positional overlap or ownership/threshold filters).` : ''}`);
   }
 
   // Minimum salary needed per remaining slot (use cheapest available at each pos)
