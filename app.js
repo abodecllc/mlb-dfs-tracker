@@ -1070,15 +1070,20 @@ function buildLineup() {
 
   luLineup = [...locked, ...bestCombo];
 
-  // WTA minimum salary enforcement: upgrade cheapest non-locked slots while
+  // WTA minimum salary enforcement: upgrade non-locked slots while
   // there are better-scoring players available within budget.
-  // Minimum salary acts as a floor, not a target — keep upgrading past it.
+  // Minimum salary acts as a floor, not a target.
   if (isWTA && wtaMinSal > 0) {
+    const lockedSet = new Set(locked.map(p => p.name));
+    const MAX_UPGRADE_PASSES = 20; // hard safety cap
+    let passes = 0;
     let improved = true;
-    while (improved) {
+
+    while (improved && passes < MAX_UPGRADE_PASSES) {
       improved = false;
-      let totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
-      const lockedSet = new Set(locked.map(p => p.name));
+      passes++;
+      const totalSal = luLineup.reduce((a,p) => a + p.sal, 0);
+      const belowMin = totalSal < wtaMinSal;
       const nonLocked = luLineup.filter(p => !lockedSet.has(p.name)).sort((a,b) => a.sal - b.sal);
 
       for (const toReplace of nonLocked) {
@@ -1087,17 +1092,15 @@ function buildLineup() {
         usedNames.delete(toReplace.name);
         const budgetLeft = CAP - totalSal + toReplace.sal;
 
-        // Find best upgrade: higher salary (if below min) OR better score (if at/above min)
-        const belowMin = totalSal < wtaMinSal;
         const upgrade = luPool
           .filter(p =>
             eligibleFor(p, slot) &&
             !usedNames.has(p.name) &&
             p.sal <= budgetLeft &&
-            p.sal !== toReplace.sal &&
+            p.sal > toReplace.sal && // must cost more (avoids pointless swaps)
             p.diff <= (isWTA ? wtaMaxDiff : MAX_DIFF) &&
             (p.own === 0 || p.own <= (isWTA ? wtaMaxOwn : 100)) &&
-            (belowMin ? p.sal > toReplace.sal : score(p) > score(toReplace))
+            (!belowMin ? score(p) > score(toReplace) + 0.01 : true) // above min: require meaningful score gain
           )
           .sort((a,b) => belowMin ? b.sal - a.sal : score(b) - score(a))[0];
 
@@ -1106,14 +1109,14 @@ function buildLineup() {
           upgrade._slot = slot;
           luLineup[idx] = upgrade;
           improved = true;
-          break; // restart the loop with updated lineup
+          break;
         }
       }
     }
 
     const finalSal = luLineup.reduce((a,p) => a + p.sal, 0);
     if (finalSal < wtaMinSal) {
-      warnings.push(`Lineup total $${finalSal.toLocaleString()} is below minimum $${wtaMinSal.toLocaleString()} — no better upgrades found within ownership/threshold filters.`);
+      warnings.push(`Lineup total $${finalSal.toLocaleString()} is below minimum $${wtaMinSal.toLocaleString()} — no upgrades found within ownership/threshold filters.`);
     }
   }
 
