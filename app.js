@@ -1515,6 +1515,8 @@ function buildShowdown() {
   // Validate Captain lock
   const cptInput = gv('sd-lock-cpt');
   const flexInput = gv('sd-lock-flex');
+  const flexInputs = flexInput ? flexInput.split(',').map(s => s.trim()).filter(Boolean) : [];
+
   const findSdPlayer = (nameInput) => {
     if (!nameInput) return null;
     const nl = nameInput.trim().toLowerCase();
@@ -1532,16 +1534,15 @@ function buildShowdown() {
       return;
     }
   }
-  if (flexInput) {
-    const found = findSdPlayer(flexInput);
-    if (!found) {
-      showAlert('sd-alert', `FLEX lock "${flexInput}" not found.`, 'danger');
-      return;
-    }
+  const notFoundFlex = flexInputs.find(fi => !findSdPlayer(fi));
+  if (notFoundFlex) {
+    showAlert('sd-alert', `FLEX lock "${notFoundFlex}" not found in this slate.`, 'danger');
+    return;
   }
 
   const lockedCpt  = findSdPlayer(cptInput);
-  const lockedFlex = findSdPlayer(flexInput);
+  const lockedFlexPlayers = flexInputs.map(fi => findSdPlayer(fi)).filter(Boolean)
+    .filter(p => !lockedCpt || p.name !== lockedCpt.name); // don't double-lock CPT
 
   // Build eligible pool: apply consensus filter
   // Apply player exclusions (partial name match)
@@ -1621,11 +1622,13 @@ function buildShowdown() {
     if (budgetLeft < 0) return null;
 
     const flexChosen = [];
-    if (lockedFlex && lockedFlex.name !== captain.name) {
-      flexChosen.push(lockedFlex);
-      used.add(lockedFlex.name);
-      budgetLeft -= lockedFlex.sal;
-      if (budgetLeft < 0) return null;
+    for (const lf of lockedFlexPlayers) {
+      if (lf.name !== captain.name && !used.has(lf.name)) {
+        flexChosen.push(lf);
+        used.add(lf.name);
+        budgetLeft -= lf.sal;
+        if (budgetLeft < 0) return null;
+      }
     }
 
     const flexNeeded = ROSTER_SIZE - 1 - flexChosen.length;
