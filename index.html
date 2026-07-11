@@ -242,14 +242,14 @@
             <div class="field">
               <label>Rank players by</label>
               <select id="lu-wta-score-method">
-                <option value="ceiling">Ceiling (SplashPlay proj + Std Dev upside)</option>
-                <option value="value" selected>Value (SplashPlay proj per $1k salary)</option>
+                <option value="ceiling" selected>Ceiling (SplashPlay proj + Std Dev upside)</option>
+                <option value="value">Value (SplashPlay proj per $1k salary)</option>
               </select>
-              <div class="field-hint">Value penalizes expensive players with similar projections (e.g. high-priced catchers). Ceiling ignores salary efficiency.</div>
+              <div class="field-hint">Ceiling matches winning WTA construction (raw points win contests). Switch to Value if one expensive player keeps starving other slots.</div>
             </div>
             <div class="field">
               <label>Minimum salary ($)</label>
-              <input type="number" id="lu-wta-min-sal" value="47000" step="500" min="0" max="50000">
+              <input type="number" id="lu-wta-min-sal" value="49000" step="500" min="0" max="50000">
               <div class="field-hint">Lineup total must reach this threshold. Helps avoid leaving ceiling on the table.</div>
             </div>
           </div>

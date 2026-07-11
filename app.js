@@ -1939,8 +1939,8 @@ function buildWtaLineups() {
   const wtaUpside  = parseFloat(g('lu-wta-upside').value) || 0.5;
   const wtaMaxOwn  = parseFloat(g('lu-wta-max-own').value) || 40;
   const wtaMaxDiff = parseFloat(g('lu-wta-diff').value) || 5;
-  const wtaScoreMethod = gv('lu-wta-score-method') || 'value';
-  const wtaMinSal  = parseInt(gv('lu-wta-min-sal')) || 47000;
+  const wtaScoreMethod = gv('lu-wta-score-method') || 'ceiling';
+  const wtaMinSal  = parseInt(gv('lu-wta-min-sal')) || 49000;
   const numLineups = parseInt(gv('lu-wta-num-lineups')) || 1;
   const excludeTeams = new Set(gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean));
   const excludePlayersRaw = gv('lu-exclude-players').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
