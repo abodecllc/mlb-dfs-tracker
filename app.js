@@ -627,11 +627,12 @@ function parseLuStok(rows) {
     const stdDev = parseFloat(r['std dev'] || r['Std Dev'] || 0) || 0;
     const own    = parseFloat(r['ownership %'] || r['Ownership %'] || 0) || 0;
     const batPos = parseInt(r['bat pos.'] || r['Bat Pos.'] || r['bat pos'] || 0) || 0;
+    const confirmed = ((r['confirmed'] || r['Confirmed'] || '') + '').trim().toUpperCase();
     if (name) {
       const key = team ? `${name}|${team}` : name;
-      out[key] = { proj, team, pos, stdDev, own, batPos };
+      out[key] = { proj, team, pos, stdDev, own, batPos, confirmed };
       if (!out[name] || (out[name].proj === 0 && proj > 0)) {
-        out[name] = { proj, team, pos, stdDev, own, batPos };
+        out[name] = { proj, team, pos, stdDev, own, batPos, confirmed };
       }
     }
   });
@@ -1977,16 +1978,25 @@ function buildWtaLineups() {
     if (sp === 0 || st === 0 || salData.sal === 0) return;
     if (excludeTeams.has(team)) return;
     if (excludePlayersRaw.some(ex => name.toLowerCase().includes(ex))) return;
+    // Pitchers must be Confirmed (C) or Probable (P) when the Stokastic file carries the flag
+    const confirmed = stEntry ? (stEntry.confirmed || '') : '';
+    if (pos.includes('SP') && confirmed && confirmed !== 'C' && confirmed !== 'P') return;
     const diff = Math.abs(sp - st);
     const ceiling = sp + wtaUpside * stdDev;
     const value = sp / (salData.sal / 1000);
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, ceiling, value, stdDev, own, batPos,
-                  consensus: (sp + st) / 2 });
+                  confirmed, consensus: (sp + st) / 2 });
   });
 
   if (!luPool.length) {
     showAlert('lineup-alert', 'No players in pool — check that all three files are for the same slate.', 'danger');
     return;
+  }
+
+  // Sanity check: if very few salary-file players matched projections, files are likely mismatched slates
+  const salCount = Object.keys(salMap).length;
+  if (luPool.length < Math.min(60, salCount * 0.1)) {
+    showAlert('lineup-alert', `Warning: only ${luPool.length} of ${salCount} salary-file players matched both projection sources. Your files may be from different slates — verify all three exports are for the same games.`, 'info', 12000);
   }
 
   const eligibleFor = (p, slot) => p.pos.split('/').map(s => s.trim()).includes(slot);
