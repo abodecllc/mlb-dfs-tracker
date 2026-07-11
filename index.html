@@ -223,28 +223,20 @@
               <div class="field-hint">WTA allows more source disagreement than cash.</div>
             </div>
           </div>
-          <div class="divider" style="margin-top:.75rem">Stack settings</div>
-          <div class="form-grid three">
-            <div class="field">
-              <label>Stack size</label>
-              <select id="lu-wta-stack-size">
-                <option value="0">No stack (ceiling only)</option>
-                <option value="4">4-man stack</option>
-                <option value="5" selected>5-man stack</option>
+          <div class="divider" style="margin-top:.75rem">Lineups &amp; stacks</div>
+          <div class="form-grid" style="margin-bottom:.5rem">
+            <div class="field" style="max-width:220px">
+              <label>Number of lineups</label>
+              <select id="lu-wta-num-lineups" onchange="renderWtaLineupConfigs()">
+                <option value="1" selected>1 lineup</option>
+                <option value="2">2 lineups</option>
+                <option value="3">3 lineups</option>
+                <option value="4">4 lineups</option>
               </select>
-              <div class="field-hint">5-man default for WTA. 4-man for small slates.</div>
-            </div>
-            <div class="field">
-              <label>Stack team (abbrev)</label>
-              <input type="text" id="lu-wta-stack-team" placeholder="e.g. LAD" maxlength="5" style="text-transform:uppercase">
-              <div class="field-hint">Leave blank to auto-pick highest ceiling team.</div>
-            </div>
-            <div class="field">
-              <label>Start stack at bat order #</label>
-              <input type="number" id="lu-wta-stack-start" value="1" min="1" max="9" step="1">
-              <div class="field-hint">Stack wraps around order. e.g. start at 5 gets spots 5-9-1-2-3 for a 5-man.</div>
+              <div class="field-hint">No player appears in more than one lineup — full differentiation including pitchers.</div>
             </div>
           </div>
+          <div id="lu-wta-lineup-configs"></div>
           <div class="divider" style="margin-top:.75rem">WTA scoring method</div>
           <div class="form-grid">
             <div class="field">

@@ -437,3 +437,42 @@ tr:hover td { background: var(--gray-50); }
   color: var(--gray-500);
   margin-top: 3px;
 }
+
+/* Multi-lineup WTA generator */
+.wta-lu-config {
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  margin-bottom: .75rem;
+}
+.wta-lu-config-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--gray-500, #6b7280);
+  margin-bottom: .5rem;
+}
+.wta-lu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+.wta-lu-col {
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 8px;
+  padding: .5rem;
+  overflow-x: auto;
+}
+.wta-lu-col-header {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: .4rem;
+  display: flex;
+  flex-direction: column;
+}
+.wta-lu-col-header span {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--gray-500, #6b7280);
+}

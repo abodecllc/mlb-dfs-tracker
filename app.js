@@ -507,10 +507,11 @@ function setLuMode(mode, btn) {
   const buildBtn = g('lu-build-btn');
   const resultTitle = g('lu-result-title');
   if (mode === 'wta') {
-    hint.textContent = 'WTA: optimizes for ceiling using Projection + (Std Dev x upside weight). Relaxes consensus threshold. Requires Stokastic Projections export with Std Dev and Ownership % columns.';
+    hint.textContent = 'WTA: optimizes for ceiling using SplashPlay proj + (Std Dev x upside weight). Builds 1-4 fully differentiated lineups — no player shared across lineups.';
     wtaSettings.style.display = 'block';
-    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build optimal WTA lineup';
-    if (resultTitle) resultTitle.textContent = 'Optimal WTA lineup';
+    buildBtn.innerHTML = '<i class="ti ti-wand"></i> Build WTA lineups';
+    if (resultTitle) resultTitle.textContent = 'WTA lineups';
+    if (!g('lu-wta-lineup-configs').innerHTML) renderWtaLineupConfigs();
   } else {
     hint.textContent = 'Cash: highest consensus floor lineup — both sources must agree within the disagreement threshold.';
     wtaSettings.style.display = 'none';
@@ -666,6 +667,9 @@ function buildLineup() {
     showAlert('lineup-alert', 'Please upload all three files first.', 'info'); return;
   }
 
+  // WTA mode routes to the multi-lineup generator
+  if (luMode === 'wta') { buildWtaLineups(); return; }
+
   const CAP       = parseInt(gv('lu-cap')) || 50000;
   const MAX_DIFF  = parseFloat(g('lu-max-diff').value) || 2.5;
   const excludeRaw = gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
@@ -681,9 +685,8 @@ function buildLineup() {
   const wtaUpside   = isWTA ? (parseFloat(g('lu-wta-upside').value) || 0.5) : 0;
   const wtaMaxOwn   = isWTA ? (parseFloat(g('lu-wta-max-own').value) || 40) : 100;
   const wtaMaxDiff  = isWTA ? (parseFloat(g('lu-wta-diff').value)    || 5)  : MAX_DIFF;
-  const wtaStackSize  = isWTA ? (parseInt(gv('lu-wta-stack-size')) || 0) : 0;
-  const wtaStackTeam  = isWTA ? gv('lu-wta-stack-team').toUpperCase().trim() : '';
-  const wtaStackStart = isWTA ? (parseInt(gv('lu-wta-stack-start')) || 1) : 1;
+  // (WTA stack settings now live in the multi-lineup generator; this path is cash-only)
+  const wtaStackSize = 0, wtaStackTeam = '', wtaStackStart = 1;
   const wtaScoreMethod = isWTA ? (gv('lu-wta-score-method') || 'value') : 'ceiling';
   const wtaMinSal = isWTA ? (parseInt(gv('lu-wta-min-sal')) || 47000) : 0;
 
@@ -1889,4 +1892,328 @@ function resetShowdownBuilder() {
   ['sd-lock-cpt','sd-lock-flex','sd-exclude-players'].forEach(id => { const el = g(id); if (el) el.value = ''; });
   const teamSel = g('sd-pool-team');
   if (teamSel) teamSel.innerHTML = '<option value="">All teams</option>';
+}
+
+// ============================================================================
+// MULTI-LINEUP WTA GENERATOR
+// ============================================================================
+let wtaLineups = []; // array of { players: [...], config: {...} }
+
+function renderWtaLineupConfigs() {
+  const n = parseInt(gv('lu-wta-num-lineups')) || 1;
+  const container = g('lu-wta-lineup-configs');
+  if (!container) return;
+  let html = '';
+  for (let i = 1; i <= n; i++) {
+    html += `
+      <div class="wta-lu-config">
+        <div class="wta-lu-config-label">Lineup ${i}</div>
+        <div class="form-grid three">
+          <div class="field">
+            <label>Stack team (abbrev)</label>
+            <input type="text" id="lu-wta-team-${i}" placeholder="blank = auto" maxlength="5" style="text-transform:uppercase">
+          </div>
+          <div class="field">
+            <label>Stack size</label>
+            <select id="lu-wta-size-${i}">
+              <option value="0">No stack</option>
+              <option value="4">4-man</option>
+              <option value="5" selected>5-man</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Start bat order #</label>
+            <input type="number" id="lu-wta-start-${i}" value="1" min="1" max="9" step="1">
+          </div>
+        </div>
+      </div>`;
+  }
+  container.innerHTML = html;
+}
+
+function buildWtaLineups() {
+  const CAP        = parseInt(gv('lu-cap')) || 50000;
+  const wtaUpside  = parseFloat(g('lu-wta-upside').value) || 0.5;
+  const wtaMaxOwn  = parseFloat(g('lu-wta-max-own').value) || 40;
+  const wtaMaxDiff = parseFloat(g('lu-wta-diff').value) || 5;
+  const wtaScoreMethod = gv('lu-wta-score-method') || 'value';
+  const wtaMinSal  = parseInt(gv('lu-wta-min-sal')) || 47000;
+  const numLineups = parseInt(gv('lu-wta-num-lineups')) || 1;
+  const excludeTeams = new Set(gv('lu-exclude-teams').toUpperCase().split(',').map(s => s.trim()).filter(Boolean));
+  const excludePlayersRaw = gv('lu-exclude-players').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+
+  // Per-lineup configs
+  const configs = [];
+  for (let i = 1; i <= numLineups; i++) {
+    configs.push({
+      team:  (gv(`lu-wta-team-${i}`) || '').toUpperCase().trim(),
+      size:  parseInt(gv(`lu-wta-size-${i}`)) || 0,
+      start: parseInt(gv(`lu-wta-start-${i}`)) || 1,
+    });
+  }
+
+  // Build pool (same logic as cash path)
+  const salMap    = parseLuSalaries(luData.sal);
+  const splashMap = parseLuSplash(luData.splash);
+  const stokMap   = parseLuStok(luData.stok);
+
+  luPool = [];
+  const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
+  allNames.forEach(name => {
+    const salData = salMap[name];
+    if (!salData) return;
+    const sp = splashMap[name] || 0;
+    const teamKey = salData.team ? `${name}|${salData.team}` : name;
+    const stEntry = stokMap[teamKey] || stokMap[name];
+    const st     = stEntry ? stEntry.proj   : 0;
+    const stdDev = stEntry ? stEntry.stdDev : 0;
+    const own    = stEntry ? stEntry.own    : 0;
+    const batPos = stEntry ? stEntry.batPos : 0;
+    const team   = (salData.team || (stEntry ? stEntry.team : '')).toUpperCase();
+    const pos    = salData.pos || (stEntry ? stEntry.pos : '');
+    if (sp === 0 || st === 0 || salData.sal === 0) return;
+    if (excludeTeams.has(team)) return;
+    if (excludePlayersRaw.some(ex => name.toLowerCase().includes(ex))) return;
+    const diff = Math.abs(sp - st);
+    const ceiling = sp + wtaUpside * stdDev;
+    const value = sp / (salData.sal / 1000);
+    luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, ceiling, value, stdDev, own, batPos,
+                  consensus: (sp + st) / 2 });
+  });
+
+  if (!luPool.length) {
+    showAlert('lineup-alert', 'No players in pool — check that all three files are for the same slate.', 'danger');
+    return;
+  }
+
+  const eligibleFor = (p, slot) => p.pos.split('/').map(s => s.trim()).includes(slot);
+  const score = p => wtaScoreMethod === 'value' ? p.value : p.ceiling;
+
+  const globalUsed = new Set(); // no player in more than one lineup
+  const warnings = [];
+  wtaLineups = [];
+
+  for (let li = 0; li < configs.length; li++) {
+    const cfg = configs[li];
+    const result = buildOneWta(cfg, li + 1);
+    if (!result) {
+      warnings.push(`Lineup ${li + 1}: could not build a valid lineup with remaining player pool. Try fewer lineups or looser filters.`);
+      continue;
+    }
+    result.players.forEach(p => globalUsed.add(p.name));
+    wtaLineups.push(result);
+  }
+
+  function buildOneWta(cfg, num) {
+    // Pool for this lineup: eligible + not used in prior lineups
+    const pool = luPool.filter(p =>
+      !globalUsed.has(p.name) &&
+      p.diff <= wtaMaxDiff &&
+      (p.own === 0 || p.own <= wtaMaxOwn)
+    );
+
+    // - Stack selection -
+    let stackPlayers = [];
+    if (cfg.size >= 4) {
+      let stackTeam = cfg.team;
+      const hitters = pool.filter(p => !eligibleFor(p, 'SP'));
+      if (!stackTeam) {
+        const tc = {};
+        hitters.forEach(p => { tc[p.team] = (tc[p.team] || 0) + p.ceiling; });
+        stackTeam = Object.entries(tc).sort((a,b) => b[1]-a[1])[0]?.[0] || '';
+      }
+      if (stackTeam) {
+        const spots = new Set();
+        for (let i = 0; i < cfg.size; i++) spots.add(((cfg.start - 1 + i) % 9) + 1);
+        let cands = hitters.filter(p => p.team === stackTeam);
+        const withBat = cands.filter(p => p.batPos >= 1 && spots.has(p.batPos));
+        if (withBat.length >= 2) cands = withBat;
+        cands.sort((a,b) => score(b) - score(a));
+
+        // Assign stack players to slots greedily, respecting position limits
+        const slotsAvail = { 'C':1,'1B':1,'2B':1,'3B':1,'SS':1,'OF':3 };
+        for (const p of cands) {
+          if (stackPlayers.length >= cfg.size) break;
+          const slot = Object.keys(slotsAvail).find(s => slotsAvail[s] > 0 && eligibleFor(p, s));
+          if (slot) {
+            const cp = Object.assign({}, p, { _slot: slot });
+            stackPlayers.push(cp);
+            slotsAvail[slot]--;
+          }
+        }
+        if (stackPlayers.length < cfg.size) {
+          warnings.push(`Lineup ${num}: only ${stackPlayers.length} of ${cfg.size} ${stackTeam} stack hitters fit (positional overlap or filters).`);
+        }
+        cfg._resolvedTeam = stackTeam;
+      }
+    }
+
+    // - Fill remaining slots -
+    const SLOTS = { 'SP':2,'C':1,'1B':1,'2B':1,'3B':1,'SS':1,'OF':3 };
+    stackPlayers.forEach(p => { if (SLOTS[p._slot] > 0) SLOTS[p._slot]--; });
+    const slotsToFill = [];
+    Object.entries(SLOTS).forEach(([pos, cnt]) => { for (let i = 0; i < cnt; i++) slotsToFill.push(pos); });
+    // Most-constrained first
+    slotsToFill.sort((a,b) =>
+      pool.filter(p => eligibleFor(p,a)).length - pool.filter(p => eligibleFor(p,b)).length
+    );
+
+    const usedNames = new Set(stackPlayers.map(p => p.name));
+    let budget = CAP - stackPlayers.reduce((a,p) => a + p.sal, 0);
+    const chosen = [...stackPlayers];
+
+    const minCost = (slots, used) => {
+      const tmp = new Set(used);
+      let tot = 0;
+      for (const s of slots) {
+        const opts = pool.filter(p => eligibleFor(p,s) && !tmp.has(p.name)).sort((a,b) => a.sal - b.sal);
+        if (!opts.length) return Infinity;
+        tot += opts[0].sal; tmp.add(opts[0].name);
+      }
+      return tot;
+    };
+
+    for (let i = 0; i < slotsToFill.length; i++) {
+      const pos = slotsToFill[i];
+      const rest = slotsToFill.slice(i + 1);
+      const restMin = minCost(rest, usedNames);
+      if (restMin === Infinity) return null;
+      const budgetForThis = budget - restMin;
+      const cands = pool
+        .filter(p => eligibleFor(p, pos) && !usedNames.has(p.name) && p.sal <= budgetForThis)
+        .sort((a,b) => score(b) - score(a));
+      if (!cands.length) return null;
+      const pick = Object.assign({}, cands[0], { _slot: pos });
+      chosen.push(pick);
+      usedNames.add(pick.name);
+      budget -= pick.sal;
+    }
+
+    // - Min salary upgrade pass (capped) -
+    const stackNames = new Set(stackPlayers.map(p => p.name));
+    let passes = 0, improved = true;
+    while (improved && passes < 20) {
+      improved = false; passes++;
+      const totalSal = chosen.reduce((a,p) => a + p.sal, 0);
+      const belowMin = totalSal < wtaMinSal;
+      const swappable = chosen.filter(p => !stackNames.has(p.name)).sort((a,b) => a.sal - b.sal);
+      for (const rep of swappable) {
+        const used2 = new Set(chosen.map(p => p.name)); used2.delete(rep.name);
+        const budgetLeft = CAP - totalSal + rep.sal;
+        const upg = pool
+          .filter(p => eligibleFor(p, rep._slot) && !used2.has(p.name) &&
+                       p.sal <= budgetLeft && p.sal > rep.sal &&
+                       (!belowMin ? score(p) > score(rep) + 0.01 : true))
+          .sort((a,b) => belowMin ? b.sal - a.sal : score(b) - score(a))[0];
+        if (upg) {
+          const idx = chosen.findIndex(p => p.name === rep.name);
+          chosen[idx] = Object.assign({}, upg, { _slot: rep._slot });
+          improved = true;
+          break;
+        }
+      }
+    }
+
+    return { players: chosen, config: cfg };
+  }
+
+  if (!wtaLineups.length) {
+    showAlert('lineup-alert', 'Could not build any lineups. ' + (warnings[0] || ''), 'danger');
+    return;
+  }
+
+  renderWtaLineupsResult(warnings, CAP, wtaScoreMethod, wtaMinSal);
+  g('lu-result').style.display = 'block';
+  const ec = g('lu-edge-card'); if (ec) ec.style.display = 'none';
+}
+
+function renderWtaLineupsResult(warnings, CAP, scoreMethod, minSal) {
+  g('lu-result-title').textContent = `WTA lineups (${wtaLineups.length})`;
+  const slotOrder = { 'SP':0,'C':1,'1B':2,'2B':3,'3B':4,'SS':5,'OF':6 };
+
+  const cols = wtaLineups.map((lu, i) => {
+    const sorted = [...lu.players].sort((a,b) =>
+      (slotOrder[a._slot] ?? 9) - (slotOrder[b._slot] ?? 9));
+    const totalSal = sorted.reduce((a,p) => a + p.sal, 0);
+    const totalSp  = sorted.reduce((a,p) => a + p.sp, 0);
+    const salColor = totalSal >= minSal ? 'var(--green)' : 'var(--red)';
+    const stackLabel = lu.config._resolvedTeam
+      ? `${lu.config.size}-man ${lu.config._resolvedTeam} (bat ${lu.config.start}+)` : 'No stack';
+
+    const rows = sorted.map(p => {
+      const isStack = lu.config._resolvedTeam && p.team === lu.config._resolvedTeam && !p.pos.includes('SP');
+      return `<tr${isStack ? ' style="background:var(--gold-light,#fff8e1)"' : ''}>
+        <td style="font-weight:600">${p._slot}</td>
+        <td>${p.name}<span style="color:var(--gray-400);font-size:10px"> ${p.team}${p.batPos > 0 ? ' #' + p.batPos : ''}</span></td>
+        <td style="text-align:right">$${(p.sal/1000).toFixed(1)}k</td>
+        <td style="text-align:right">${p.sp.toFixed(1)}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="wta-lu-col">
+      <div class="wta-lu-col-header">Lineup ${i + 1}<span>${stackLabel}</span></div>
+      <table class="bd-table" style="font-size:12px">
+        <thead><tr><th>Slot</th><th style="text-align:left">Player</th><th>Sal</th><th>SP</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="font-weight:600;border-top:2px solid var(--gray-200)">
+          <td colspan="2">TOTAL</td>
+          <td style="text-align:right;color:${salColor}">$${(totalSal/1000).toFixed(1)}k</td>
+          <td style="text-align:right">${totalSp.toFixed(1)}</td>
+        </tr></tfoot>
+      </table>
+    </div>`;
+  }).join('');
+
+  g('lu-lineup-table').innerHTML = `<div class="wta-lu-grid">${cols}</div>`;
+
+  const warnHTML = warnings.length
+    ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
+    : '<div style="font-size:12px;color:var(--gray-500)">All lineups built cleanly. No duplicated players across lineups.</div>';
+  g('lu-warnings').innerHTML = warnHTML;
+
+  const existingBtn = g('lu-export-btn');
+  if (existingBtn) existingBtn.remove();
+  const btn = document.createElement('button');
+  btn.id = 'lu-export-btn';
+  btn.className = 'btn primary';
+  btn.style.marginTop = '1rem';
+  btn.innerHTML = `<i class="ti ti-download"></i> Export ${wtaLineups.length} lineup${wtaLineups.length > 1 ? 's' : ''} (single CSV)`;
+  btn.onclick = exportWtaLineups;
+  g('lu-lineup-table').after(btn);
+}
+
+function exportWtaLineups() {
+  if (!wtaLineups.length) return;
+  const salMap = parseLuSalaries(luData.sal);
+  const header = 'P,P,C,1B,2B,3B,SS,OF,OF,OF';
+  const slotSeq = ['SP','SP','C','1B','2B','3B','SS','OF','OF','OF'];
+
+  const lines = wtaLineups.map(lu => {
+    // Order players to match slot sequence
+    const bySlot = {};
+    lu.players.forEach(p => {
+      if (!bySlot[p._slot]) bySlot[p._slot] = [];
+      bySlot[p._slot].push(p);
+    });
+    const ordered = [];
+    const consumed = new Set();
+    slotSeq.forEach(s => {
+      const cand = (bySlot[s] || []).find(p => !consumed.has(p.name));
+      if (cand) { ordered.push(cand); consumed.add(cand.name); }
+    });
+    return ordered.map(p => {
+      const se = salMap[p.name];
+      return se && se.id ? `${p.name} (${se.id})` : p.name;
+    }).join(',');
+  });
+
+  const csv = header + '\n' + lines.join('\n') + '\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = `DK_wta_lineups_${todayISO()}.csv`;
+  a.click();
+
+  showAlert('lineup-alert',
+    'Downloaded. If DK rejects this on upload, download DK\'s own template from the contest\'s "Upload Lineups" screen and copy these rows into its columns.',
+    'info', 12000);
 }
