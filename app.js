@@ -1290,7 +1290,10 @@ function renderPool() {
     return b.consensus - a.consensus;
   });
 
-  const inLineup = new Set(luLineup.map(p => p.name));
+  const inLineup = new Set([
+    ...luLineup.map(p => p.name),
+    ...(typeof wtaLineups !== 'undefined' ? wtaLineups.flatMap(l => l.players.map(p => p.name)) : [])
+  ]);
 
   const rows = data.slice(0, 60).map(p => {
     const highlight = inLineup.has(p.name) ? 'background:var(--green-light)' : '';
@@ -1989,13 +1992,38 @@ function buildWtaLineups() {
   const eligibleFor = (p, slot) => p.pos.split('/').map(s => s.trim()).includes(slot);
   const score = p => wtaScoreMethod === 'value' ? p.value : p.ceiling;
 
+  // Parse lock fields — locked players go into Lineup 1
+  const findInPool = (nameInput, posFilter) => {
+    if (!nameInput) return null;
+    const nl = nameInput.trim().toLowerCase();
+    return luPool.find(p => p.name.toLowerCase().includes(nl) && (!posFilter || p.pos.includes(posFilter)));
+  };
+  const lockDefs = [
+    { input: gv('lu-lock-sp1'), pos: 'SP', label: 'Lock SP1' },
+    { input: gv('lu-lock-sp2'), pos: 'SP', label: 'Lock SP2' },
+    { input: gv('lu-lock-h1'),  pos: gv('lu-lock-h1-pos') || null, label: 'Lock hitter 1' },
+    { input: gv('lu-lock-h2'),  pos: gv('lu-lock-h2-pos') || null, label: 'Lock hitter 2' },
+  ];
+  const lockedPlayers = [];
+  for (const ld of lockDefs) {
+    if (!ld.input) continue;
+    const found = findInPool(ld.input, ld.pos === 'SP' ? 'SP' : null);
+    if (!found) {
+      showAlert('lineup-alert', `${ld.label} "${ld.input}" not found in the WTA pool. Note: pool requires both sources to project the player and ownership below the max filter.`, 'danger');
+      return;
+    }
+    if (!lockedPlayers.some(p => p.name === found.name)) {
+      lockedPlayers.push(Object.assign({}, found, { _lockPos: ld.pos }));
+    }
+  }
+
   const globalUsed = new Set(); // no player in more than one lineup
   const warnings = [];
   wtaLineups = [];
 
   for (let li = 0; li < configs.length; li++) {
     const cfg = configs[li];
-    const result = buildOneWta(cfg, li + 1);
+    const result = buildOneWta(cfg, li + 1, li === 0 ? lockedPlayers : []);
     if (!result) {
       warnings.push(`Lineup ${li + 1}: could not build a valid lineup with remaining player pool. Try fewer lineups or looser filters.`);
       continue;
@@ -2004,13 +2032,30 @@ function buildWtaLineups() {
     wtaLineups.push(result);
   }
 
-  function buildOneWta(cfg, num) {
-    // Pool for this lineup: eligible + not used in prior lineups
+  function buildOneWta(cfg, num, locks = []) {
+    // Pool for this lineup: eligible + not used in prior lineups.
+    // Locked players bypass the ownership/diff filters.
+    const lockNames = new Set(locks.map(p => p.name));
     const pool = luPool.filter(p =>
       !globalUsed.has(p.name) &&
-      p.diff <= wtaMaxDiff &&
-      (p.own === 0 || p.own <= wtaMaxOwn)
+      (lockNames.has(p.name) || (p.diff <= wtaMaxDiff && (p.own === 0 || p.own <= wtaMaxOwn)))
     );
+
+    // - Assign locks to slots first -
+    const preAssigned = [];
+    const lockSlotsAvail = { 'SP':2,'C':1,'1B':1,'2B':1,'3B':1,'SS':1,'OF':3 };
+    for (const lk of locks) {
+      let slot = null;
+      if (lk._lockPos === 'SP') slot = lockSlotsAvail['SP'] > 0 ? 'SP' : null;
+      else if (lk._lockPos && lockSlotsAvail[lk._lockPos] > 0 && eligibleFor(lk, lk._lockPos)) slot = lk._lockPos;
+      else slot = Object.keys(lockSlotsAvail).find(s => s !== 'SP' && lockSlotsAvail[s] > 0 && eligibleFor(lk, s));
+      if (slot) {
+        preAssigned.push(Object.assign({}, lk, { _slot: slot }));
+        lockSlotsAvail[slot]--;
+      } else {
+        warnings.push(`Lineup ${num}: lock ${lk.name} could not be assigned a slot.`);
+      }
+    }
 
     // - Stack selection -
     let stackPlayers = [];
@@ -2025,13 +2070,15 @@ function buildWtaLineups() {
       if (stackTeam) {
         const spots = new Set();
         for (let i = 0; i < cfg.size; i++) spots.add(((cfg.start - 1 + i) % 9) + 1);
-        let cands = hitters.filter(p => p.team === stackTeam);
+        const preNames = new Set(preAssigned.map(p => p.name));
+        let cands = hitters.filter(p => p.team === stackTeam && !preNames.has(p.name));
         const withBat = cands.filter(p => p.batPos >= 1 && spots.has(p.batPos));
         if (withBat.length >= 2) cands = withBat;
         cands.sort((a,b) => score(b) - score(a));
 
-        // Assign stack players to slots greedily, respecting position limits
+        // Assign stack players to slots greedily, respecting slots left after locks
         const slotsAvail = { 'C':1,'1B':1,'2B':1,'3B':1,'SS':1,'OF':3 };
+        preAssigned.forEach(p => { if (p._slot !== 'SP' && slotsAvail[p._slot] > 0) slotsAvail[p._slot]--; });
         for (const p of cands) {
           if (stackPlayers.length >= cfg.size) break;
           const slot = Object.keys(slotsAvail).find(s => slotsAvail[s] > 0 && eligibleFor(p, s));
@@ -2050,6 +2097,7 @@ function buildWtaLineups() {
 
     // - Fill remaining slots -
     const SLOTS = { 'SP':2,'C':1,'1B':1,'2B':1,'3B':1,'SS':1,'OF':3 };
+    preAssigned.forEach(p => { if (SLOTS[p._slot] > 0) SLOTS[p._slot]--; });
     stackPlayers.forEach(p => { if (SLOTS[p._slot] > 0) SLOTS[p._slot]--; });
     const slotsToFill = [];
     Object.entries(SLOTS).forEach(([pos, cnt]) => { for (let i = 0; i < cnt; i++) slotsToFill.push(pos); });
@@ -2058,9 +2106,10 @@ function buildWtaLineups() {
       pool.filter(p => eligibleFor(p,a)).length - pool.filter(p => eligibleFor(p,b)).length
     );
 
-    const usedNames = new Set(stackPlayers.map(p => p.name));
-    let budget = CAP - stackPlayers.reduce((a,p) => a + p.sal, 0);
-    const chosen = [...stackPlayers];
+    const starters = [...preAssigned, ...stackPlayers];
+    const usedNames = new Set(starters.map(p => p.name));
+    let budget = CAP - starters.reduce((a,p) => a + p.sal, 0);
+    const chosen = [...starters];
 
     const minCost = (slots, used) => {
       const tmp = new Set(used);
@@ -2089,8 +2138,8 @@ function buildWtaLineups() {
       budget -= pick.sal;
     }
 
-    // - Min salary upgrade pass (capped) -
-    const stackNames = new Set(stackPlayers.map(p => p.name));
+    // - Min salary upgrade pass (capped) — never swaps locks or stack -
+    const stackNames = new Set([...stackPlayers.map(p => p.name), ...preAssigned.map(p => p.name)]);
     let passes = 0, improved = true;
     while (improved && passes < 20) {
       improved = false; passes++;
@@ -2124,6 +2173,7 @@ function buildWtaLineups() {
 
   renderWtaLineupsResult(warnings, CAP, wtaScoreMethod, wtaMinSal);
   g('lu-result').style.display = 'block';
+  renderPool();
   const ec = g('lu-edge-card'); if (ec) ec.style.display = 'none';
 }
 
