@@ -2132,6 +2132,12 @@ function buildWtaLineups() {
       return tot;
     };
 
+    // Track hitters per team (DK max: 5 hitters from one team; pitchers exempt)
+    const teamHitterCount = {};
+    chosen.forEach(p => {
+      if (p._slot !== 'SP') teamHitterCount[p.team] = (teamHitterCount[p.team] || 0) + 1;
+    });
+
     for (let i = 0; i < slotsToFill.length; i++) {
       const pos = slotsToFill[i];
       const rest = slotsToFill.slice(i + 1);
@@ -2139,12 +2145,17 @@ function buildWtaLineups() {
       if (restMin === Infinity) return null;
       const budgetForThis = budget - restMin;
       const cands = pool
-        .filter(p => eligibleFor(p, pos) && !usedNames.has(p.name) && p.sal <= budgetForThis)
+        .filter(p => {
+          if (!eligibleFor(p, pos) || usedNames.has(p.name) || p.sal > budgetForThis) return false;
+          if (pos !== 'SP' && (teamHitterCount[p.team] || 0) >= 5) return false;
+          return true;
+        })
         .sort((a,b) => score(b) - score(a));
       if (!cands.length) return null;
       const pick = Object.assign({}, cands[0], { _slot: pos });
       chosen.push(pick);
       usedNames.add(pick.name);
+      if (pos !== 'SP') teamHitterCount[pick.team] = (teamHitterCount[pick.team] || 0) + 1;
       budget -= pick.sal;
     }
 
@@ -2159,9 +2170,14 @@ function buildWtaLineups() {
       for (const rep of swappable) {
         const used2 = new Set(chosen.map(p => p.name)); used2.delete(rep.name);
         const budgetLeft = CAP - totalSal + rep.sal;
+        const hittersByTeam = {};
+        chosen.forEach(p => {
+          if (p._slot !== 'SP' && p.name !== rep.name) hittersByTeam[p.team] = (hittersByTeam[p.team] || 0) + 1;
+        });
         const upg = pool
           .filter(p => eligibleFor(p, rep._slot) && !used2.has(p.name) &&
                        p.sal <= budgetLeft && p.sal > rep.sal &&
+                       (rep._slot === 'SP' || (hittersByTeam[p.team] || 0) < 5) &&
                        (!belowMin ? score(p) > score(rep) + 0.01 : true))
           .sort((a,b) => belowMin ? b.sal - a.sal : score(b) - score(a))[0];
         if (upg) {
