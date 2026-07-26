@@ -429,6 +429,8 @@ function renderDashboard() {
 
   g('breakdown-grid').innerHTML = [byClass, bySite, byType].filter(Boolean).join('') ||
     '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1;padding:1rem">Import results to see breakdowns.</p>';
+
+  renderTrendChart(all);
 }
 
 // - History -
@@ -438,6 +440,8 @@ function renderHistory() {
   if (sf) data = data.filter(e => e.site   === sf);
   if (cf) data = data.filter(e => e.cls    === cf);
   if (rf) data = data.filter(e => e.cashed === rf);
+  // Newest first
+  data.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   if (!data.length) {
     g('hist-table').innerHTML = '<div class="empty"><i class="ti ti-database-off"></i>No entries yet - import a results CSV to get started.</div>';
@@ -855,6 +859,17 @@ function buildLineup() {
   const stackAdditions = wtaStackPlayers.filter(p => !lockedNames_ui.has(p.name));
   const locked = [...lockedFromUI, ...stackAdditions];
   const lockedNames = new Set(locked.map(p => p.name));
+  // DK rule: max 5 hitters from one team (SP slots exempt). Seed counts from locks.
+  const lockedTeamHitters = {};
+  locked.forEach(p => {
+    const slot = p._slot || p.pos.split('/')[0].trim();
+    if (slot !== 'SP') lockedTeamHitters[p.team] = (lockedTeamHitters[p.team] || 0) + 1;
+  });
+  const countTeamHitters = (chosenArr) => {
+    const c = Object.assign({}, lockedTeamHitters);
+    chosenArr.forEach(p => { if (p._slot !== 'SP') c[p.team] = (c[p.team] || 0) + 1; });
+    return c;
+  };
   const lockedSal = locked.reduce((a, p) => a + p.sal, 0);
   const remaining = CAP - lockedSal;
 
@@ -982,10 +997,13 @@ function buildLineup() {
       const minRest = minCostForSlots(startPool, restSlots, used);
       if (minRest === Infinity) return;
 
+      const slotPos = slotsArr[slotIdx];
+      const teamCounts = countTeamHitters(chosen);
       for (const p of candidatesPerSlot[slotIdx]) {
         if (capped) return;
         if (used.has(p.name)) continue;
         if (p.sal > budgetLeft - minRest) continue;
+        if (slotPos !== 'SP' && (teamCounts[p.team] || 0) >= 5) continue;
         used.add(p.name);
         chosen.push(Object.assign(Object.create(Object.getPrototypeOf(p)), p, { _slot: slotsArr[slotIdx] }));
         dfs(slotIdx + 1, used, budgetLeft - p.sal, chosen);
@@ -1013,8 +1031,10 @@ function buildLineup() {
       const rest = slotsArr.slice(idx + 1);
       const minRest = minCostForSlots(startPool, rest, used);
       const budgetForThis = left - minRest;
+      const teamCounts = countTeamHitters(chosen);
       const cands = startPool
-        .filter(p => eligibleFor(p, pos) && !used.has(p.name) && p.sal <= budgetForThis)
+        .filter(p => eligibleFor(p, pos) && !used.has(p.name) && p.sal <= budgetForThis &&
+                     (pos === 'SP' || (teamCounts[p.team] || 0) < 5))
         .sort((a, b) => score(b) - score(a));
       if (!cands.length) return null;
       const pick = cands[0];
@@ -2292,4 +2312,105 @@ function exportWtaLineups() {
   showAlert('lineup-alert',
     'Downloaded. If DK rejects this on upload, download DK\'s own template from the contest\'s "Upload Lineups" screen and copy these rows into its columns.',
     'info', 12000);
+}
+
+
+// ============================================================================
+// ROI TREND CHART (weekly, SVG, no dependencies)
+// ============================================================================
+function renderTrendChart(all) {
+  const card = g('trend-card');
+  if (!card) return;
+  const dated = all.filter(e => e.date);
+  if (dated.length < 5) { card.style.display = 'none'; return; }
+
+  // Group by ISO week start (Monday) per class
+  const weekKey = (dateStr) => {
+    const d = new Date(dateStr + 'T12:00:00');
+    if (isNaN(d)) return null;
+    const day = (d.getDay() + 6) % 7; // Mon=0
+    d.setDate(d.getDate() - day);
+    return d.toISOString().split('T')[0];
+  };
+
+  const classes = ['Cash', 'GPP', 'WTA'];
+  const buckets = {}; // week -> cls -> {inv, win}
+  dated.forEach(e => {
+    const wk = weekKey(e.date);
+    if (!wk) return;
+    if (!buckets[wk]) buckets[wk] = {};
+    const cls = classes.includes(e.cls) ? e.cls : 'GPP';
+    if (!buckets[wk][cls]) buckets[wk][cls] = { inv: 0, win: 0 };
+    buckets[wk][cls].inv += e.invested || e.fee || 0;
+    buckets[wk][cls].win += e.win || ((e.pl || 0) + (e.fee || 0));
+  });
+
+  const weeks = Object.keys(buckets).sort();
+  if (weeks.length < 2) { card.style.display = 'none'; return; }
+
+  const series = {};
+  const CLIP = 150; // clip display at +/-150% so outlier weeks don't flatten the chart
+  classes.forEach(cls => {
+    series[cls] = weeks.map(wk => {
+      const b = buckets[wk][cls];
+      if (!b || b.inv === 0) return null;
+      const roi = (b.win - b.inv) / b.inv * 100;
+      return { roi, clipped: Math.max(-CLIP, Math.min(CLIP, roi)), inv: b.inv };
+    });
+  });
+
+  // SVG layout
+  const W = 700, H = 260, PAD = { l: 46, r: 12, t: 12, b: 30 };
+  const plotW = W - PAD.l - PAD.r, plotH = H - PAD.t - PAD.b;
+  // Y domain from clipped values
+  let yMin = 0, yMax = 0;
+  classes.forEach(cls => series[cls].forEach(pt => {
+    if (!pt) return;
+    yMin = Math.min(yMin, pt.clipped); yMax = Math.max(yMax, pt.clipped);
+  }));
+  yMin = Math.floor(yMin / 25) * 25 - 5; yMax = Math.ceil(yMax / 25) * 25 + 5;
+  if (yMax - yMin < 30) { yMax += 15; yMin -= 15; }
+
+  const x = i => PAD.l + (weeks.length === 1 ? plotW / 2 : i / (weeks.length - 1) * plotW);
+  const y = v => PAD.t + (yMax - v) / (yMax - yMin) * plotH;
+
+  const colors = { Cash: '#2563eb', GPP: '#16a34a', WTA: '#d97706' };
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;font-family:inherit">`;
+  // Gridlines + labels
+  for (let v = Math.ceil(yMin / 25) * 25; v <= yMax; v += 25) {
+    svg += `<line x1="${PAD.l}" y1="${y(v)}" x2="${W - PAD.r}" y2="${y(v)}" stroke="${v === 0 ? '#9ca3af' : '#e5e7eb'}" stroke-width="${v === 0 ? 1.5 : 1}"/>`;
+    svg += `<text x="${PAD.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#6b7280">${v}%</text>`;
+  }
+  // X labels (every other week if crowded)
+  const step = weeks.length > 10 ? 2 : 1;
+  weeks.forEach((wk, i) => {
+    if (i % step !== 0) return;
+    const label = wk.slice(5); // MM-DD
+    svg += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" fill="#6b7280">${label}</text>`;
+  });
+  // Lines + points
+  classes.forEach(cls => {
+    const pts = series[cls];
+    let path = '', started = false;
+    pts.forEach((pt, i) => {
+      if (!pt) { started = false; return; }
+      path += (started ? ' L' : ' M') + x(i).toFixed(1) + ' ' + y(pt.clipped).toFixed(1);
+      started = true;
+    });
+    if (path) svg += `<path d="${path}" fill="none" stroke="${colors[cls]}" stroke-width="2"/>`;
+    pts.forEach((pt, i) => {
+      if (!pt) return;
+      const clippedMark = Math.abs(pt.roi) > CLIP ? ' (clipped)' : '';
+      svg += `<circle cx="${x(i)}" cy="${y(pt.clipped)}" r="3.5" fill="${colors[cls]}">` +
+        `<title>${cls} · wk of ${weeks[i]}: ${pt.roi.toFixed(1)}% ROI on $${pt.inv.toFixed(0)}${clippedMark}</title></circle>`;
+    });
+  });
+  svg += '</svg>';
+
+  g('trend-chart').innerHTML = svg;
+  g('trend-legend').innerHTML = classes.map(cls =>
+    `<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:${colors[cls]};display:inline-block"></span>${cls}</span>`
+  ).join('') + '<span style="color:var(--gray-400)">Hover points for exact values. Extreme weeks clipped at ±150%.</span>';
+  card.style.display = 'block';
 }
