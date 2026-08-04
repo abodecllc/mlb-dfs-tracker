@@ -587,6 +587,15 @@ function parseLuSalaries(rows) {
     const rawPos  = (r['position'] || r['Position'] || rawRosterPos || '').trim();
     const team = (r['teamabbrev'] || r['team abbrev'] || r['team'] || r['Team'] || '').trim();
     const id   = (r['id'] || r['ID'] || r['playerid'] || r['player id'] || '').trim();
+    // Derive opponent from Game Info (e.g. "MIL@STL 07/09/2026 07:45PM ET")
+    const gameInfo = (r['game info'] || r['Game Info'] || '').trim();
+    let opp = '';
+    const mMatch = gameInfo.match(/^([A-Z0-9]+)@([A-Z0-9]+)/i);
+    if (mMatch) {
+      const away = mMatch[1].toUpperCase(), home = mMatch[2].toUpperCase();
+      const tU = team.toUpperCase();
+      opp = tU === away ? home : (tU === home ? away : '');
+    }
     // Normalize: SP/RP both become SP for optimizer; keep multi-position as-is
     let pos = (rawPos === 'RP') ? 'SP' : rawPos;
     pos = pos.replace(/^CPT\/?/, '').replace(/^MVP\/?/, '') || pos;
@@ -597,7 +606,7 @@ function parseLuSalaries(rows) {
       const isCptRow = rawRosterPos === 'CPT' || rawRosterPos === 'MVP';
       const existingIsCpt = out[name] && out[name]._isCpt;
       if (!out[name] || (existingIsCpt && !isCptRow)) {
-        out[name] = { sal, pos, team, id, _isCpt: isCptRow };
+        out[name] = { sal, pos, team, id, opp, _isCpt: isCptRow };
       }
     }
   });
@@ -2005,7 +2014,7 @@ function buildWtaLineups() {
     const ceiling = sp + wtaUpside * stdDev;
     const value = sp / (salData.sal / 1000);
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, ceiling, value, stdDev, own, batPos,
-                  confirmed, consensus: (sp + st) / 2 });
+                  confirmed, opp: salData.opp || '', consensus: (sp + st) / 2 });
   });
 
   if (!luPool.length) {
@@ -2164,13 +2173,33 @@ function buildWtaLineups() {
       const restMin = minCost(rest, usedNames);
       if (restMin === Infinity) return null;
       const budgetForThis = budget - restMin;
+      // Teams we hold hitters from — an SP facing them is anticorrelated
+      const hitterTeams = new Set(chosen.filter(x => x._slot !== 'SP').map(x => x.team));
+      const stackTeamNow = cfg._resolvedTeam || '';
       const cands = pool
         .filter(p => {
           if (!eligibleFor(p, pos) || usedNames.has(p.name) || p.sal > budgetForThis) return false;
           if (pos !== 'SP' && (teamHitterCount[p.team] || 0) >= 5) return false;
+          if (pos === 'SP' && p.opp) {
+            // Hard block: SP facing the defined stack team
+            if (stackTeamNow && p.opp === stackTeamNow) return false;
+            // Also avoid SPs facing any team we already have bats from
+            if (hitterTeams.has(p.opp)) return false;
+          }
           return true;
         })
         .sort((a,b) => score(b) - score(a));
+      // If the opponent guard left nothing, relax to stack-team-only blocking
+      if (!cands.length && pos === 'SP') {
+        const relaxed = pool
+          .filter(p => eligibleFor(p, pos) && !usedNames.has(p.name) && p.sal <= budgetForThis &&
+                       !(stackTeamNow && p.opp === stackTeamNow))
+          .sort((a,b) => score(b) - score(a));
+        if (relaxed.length) {
+          warnings.push(`Lineup ${num}: SP pool was tight — allowed an arm facing a non-stack bat.`);
+          cands.push(...relaxed);
+        }
+      }
       if (!cands.length) return null;
       const pick = Object.assign({}, cands[0], { _slot: pos });
       chosen.push(pick);
@@ -2194,10 +2223,15 @@ function buildWtaLineups() {
         chosen.forEach(p => {
           if (p._slot !== 'SP' && p.name !== rep.name) hittersByTeam[p.team] = (hittersByTeam[p.team] || 0) + 1;
         });
+        const heldHitterTeams = new Set(chosen.filter(x => x._slot !== 'SP' && x.name !== rep.name).map(x => x.team));
+        const stackTeamNow2 = cfg._resolvedTeam || '';
         const upg = pool
           .filter(p => eligibleFor(p, rep._slot) && !used2.has(p.name) &&
                        p.sal <= budgetLeft && p.sal > rep.sal &&
                        (rep._slot === 'SP' || (hittersByTeam[p.team] || 0) < 5) &&
+                       !(rep._slot === 'SP' && p.opp &&
+                         ((stackTeamNow2 && p.opp === stackTeamNow2) || heldHitterTeams.has(p.opp))) &&
+                       !(rep._slot !== 'SP' && chosen.some(x => x._slot === 'SP' && x.opp === p.team)) &&
                        (!belowMin ? score(p) > score(rep) + 0.01 : true))
           .sort((a,b) => belowMin ? b.sal - a.sal : score(b) - score(a))[0];
         if (upg) {
