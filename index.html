@@ -490,6 +490,54 @@
       </div>
 
       <div class="card">
+        <div class="divider">The four approaches — tag every import</div>
+        <p class="gpp-text">Any single approach looks broken over a short window. Chris runs 15+ approaches at ~200 lineups each nightly and grades them — one night an approach takes first, the next night the same one tanks. You cannot run that volume, but you can tag which method built each set so a cold stretch is distinguishable from a broken method. Pick one approach per slate, tag the import, and let the dashboard's <strong>GPP by approach</strong> card accumulate.</p>
+
+        <div class="table-wrap" style="margin-top:1rem">
+          <table class="bd-table" style="font-size:13px">
+            <thead><tr><th style="text-align:left">Approach</th><th style="text-align:left">How to build it</th><th style="text-align:left">Betting on</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Banded</strong></td>
+                <td>Rank teams by Vegas implied total, cut into chalk / middle / deep bands, pick teams inside each band by SIM ROI, allocate to the target percentages in the band table above.</td>
+                <td>Vegas rank being a decent proxy for field ownership, and the middle band (ranks 3-7) producing the plurality of winners.</td>
+              </tr>
+              <tr>
+                <td><strong>Flat spread</strong></td>
+                <td>Roughly equal exposure across every team with a viable stack. On a 4-gamer that is ~8 teams; take a 5-man stack from each with the best hitters. Little or no ranking.</td>
+                <td>Chris's point that the explosive stack can come from anywhere — his Baltimore hit was Vegas rank 14 of 20 and bottom of his own top-stacks tool.</td>
+              </tr>
+              <tr>
+                <td><strong>SIM ROI top-N</strong></td>
+                <td>Take Chris's top-N stacks by SIM ROI and build the book straight off that list, ignoring Vegas rank entirely. Weight by the ROI figures, using the joint-ROI arm pairings.</td>
+                <td>The ownership-adjusted money grade already being the right answer, with no further filtering needed.</td>
+              </tr>
+              <tr>
+                <td><strong>Manual</strong></td>
+                <td>Hand-built off your own read of the slate — weather, park, a specific matchup you like. Also the tag for anything that does not fit the other three.</td>
+                <td>Slate-specific judgment the models are not capturing.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="gpp-text" style="margin-top:.75rem"><strong>Read the results honestly.</strong> At 10-20 GPP entries a slate you accumulate a few hundred lineups per approach in a month. That is enough to catch a clearly broken approach and nowhere near enough to pick a winner between two decent ones. Chris sees approaches trade places at 200 lineups <em>per night</em>. Treat the breakdown as a smoke alarm, not a leaderboard, and give it real time before acting.</p>
+
+        <p class="gpp-text" style="margin-top:.75rem"><strong>One approach per slate.</strong> Splitting a slate dilutes both samples and makes the comparison slower to resolve. Rotate between slates instead.</p>
+      </div>
+
+      <div class="card">
+        <div class="divider">Uniques — set before favoriting</div>
+        <p class="gpp-text">Uniques is a minimum-difference constraint: <strong>5 uniques means any two lineups must differ by at least 5 players</strong>. With 10 roster spots that caps overlap at half the roster.</p>
+        <ul class="gpp-bullets" style="margin-top:.75rem">
+          <li><strong>Why it matters:</strong> an unconstrained optimizer produces near-duplicates. The top 150 by sim ROI are mostly permutations of the same few builds — swap a corner infielder, swap a min-priced outfielder. Without uniques you can enter 150 lineups and hold about six real positions.</li>
+          <li><strong>Order matters.</strong> Set uniques <em>first</em>, then favorite your top N. Favoriting first and constraining after just filters an already-converged set. Chris sets 5 uniques before favoriting his top 150.</li>
+          <li><strong>Scale it to book size.</strong> Roughly <strong>2-3 uniques on a 20-lineup book, 3-4 on 50, 5 on 150+</strong>. High uniques on a small book forces you off your best lineups by the eighth or so entry.</li>
+          <li><strong>Go low on 4-gamers.</strong> With 8 teams the structurally distinct space is small, and a high setting manufactures artificial differences rather than meaningful ones.</li>
+          <li><strong>Uniques is a cleaner lever than team caps</strong> for genuine variety. A cap says "no more than X% on MIA" but leaves those lineups otherwise identical; uniques forces real structural difference. If a concentrated book also ran low uniques, it is even less diversified than the exposure numbers suggest.</li>
+        </ul>
+      </div>
+      <div class="card">
         <div class="divider">Band workflow — do this every slate</div>
         <ol class="gpp-bullets" style="padding-left:1.25rem">
           <li><strong>List all teams by Vegas implied total, highest to lowest.</strong> This is your rank order, and it approximates what the field is looking at.</li>
