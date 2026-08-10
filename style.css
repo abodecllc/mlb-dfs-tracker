@@ -476,3 +476,18 @@ tr:hover td { background: var(--gray-50); }
   font-size: 11px;
   color: var(--gray-500, #6b7280);
 }
+
+/* Approach tag cell in History */
+.tag-cell {
+  width: 100%;
+  min-width: 90px;
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--gray-700);
+}
+.tag-cell:hover  { border-color: var(--gray-200); }
+.tag-cell:focus  { border-color: var(--green); background: #fff; outline: none; }
+.tag-cell::placeholder { color: var(--gray-300); }

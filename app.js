@@ -265,6 +265,7 @@ function confirmImport() {
       cashed:  r.cashed,
       win:     r.win,
       pl:      +(r.win - r.fee).toFixed(2),
+      tag:     gv('import-tag') || '',
     });
     added++;
   });
@@ -329,6 +330,7 @@ function resetImport() {
   g('import-step1').style.display = 'block';
   g('import-step2').style.display = 'none';
   g('csv-file').value = '';
+  const t = g('import-tag'); if (t) t.value = '';
 }
 
 // - Dashboard -
@@ -419,6 +421,24 @@ function renderDashboard() {
     </div>`;
   }
 
+  // Approach tags — GPP only, since tags describe stack-construction method
+  function bucketOf(list, keyFn) {
+    const map = {};
+    list.forEach(e => {
+      const k = keyFn(e) || 'Untagged';
+      if (!map[k]) map[k] = { n: 0, invested: 0, win: 0, cashes: 0 };
+      map[k].n++;
+      map[k].invested += e.invested || 0;
+      map[k].win      += e.win      || 0;
+      if (e.cashed === 'Y') map[k].cashes++;
+    });
+    return map;
+  }
+  const tagMap = bucketOf(gpp, e => e.tag);
+  // Untagged last, rest alphabetical
+  const tagOrder = Object.keys(tagMap).filter(k => k !== 'Untagged').sort().concat(
+    tagMap['Untagged'] ? ['Untagged'] : []);
+
   const clsMap  = bucket(e => e.cls);
   const siteMap = bucket(e => e.site);
   const typeMap = bucket(e => e.ctype || e.cls || 'Unknown');
@@ -426,8 +446,10 @@ function renderDashboard() {
   const byClass   = breakdownCard('GPP / Cash / WTA', clsMap, ['GPP', 'Cash', 'WTA']);
   const bySite    = breakdownCard('By site', siteMap, ['DK', 'FD']);
   const byType    = breakdownCard('By contest type', typeMap, ['GPP','Double Up','50/50','H2H','Satellite/WTA','Cash - Other']);
+  const byTag     = tagOrder.length > 1 || (tagOrder.length === 1 && tagOrder[0] !== 'Untagged')
+    ? breakdownCard('GPP by approach', tagMap, tagOrder) : '';
 
-  g('breakdown-grid').innerHTML = [byClass, bySite, byType].filter(Boolean).join('') ||
+  g('breakdown-grid').innerHTML = [byClass, byTag, bySite, byType].filter(Boolean).join('') ||
     '<p style="font-size:13px;color:var(--gray-400);grid-column:1/-1;padding:1rem">Import results to see breakdowns.</p>';
 
   renderTrendChart(all);
@@ -436,10 +458,25 @@ function renderDashboard() {
 // - History -
 function renderHistory() {
   const sf = gv('hist-site'), cf = gv('hist-class'), rf = gv('hist-cashed');
+  // Rebuild the approach filter from whatever tags exist
+  const tagSel = g('hist-tag');
+  const prevTag = tagSel ? tagSel.value : '';
+  if (tagSel) {
+    const tags = [...new Set(entries.map(e => e.tag).filter(Boolean))].sort();
+    const hasUntagged = entries.some(e => !e.tag);
+    tagSel.innerHTML = '<option value="">All approaches</option>' +
+      tags.map(t => `<option value="${t}">${t}</option>`).join('') +
+      (hasUntagged ? '<option value="__none">Untagged</option>' : '');
+    tagSel.value = prevTag;
+  }
+  const tf = tagSel ? tagSel.value : '';
+
   let data = [...entries];
   if (sf) data = data.filter(e => e.site   === sf);
   if (cf) data = data.filter(e => e.cls    === cf);
   if (rf) data = data.filter(e => e.cashed === rf);
+  if (tf === '__none') data = data.filter(e => !e.tag);
+  else if (tf)         data = data.filter(e => e.tag === tf);
   // Newest first
   data.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
@@ -453,6 +490,8 @@ function renderHistory() {
     <td><span class="badge ${(e.site||'').toLowerCase()}">${e.site || '-'}</span></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="${e.contest}">${e.contest}</td>
     <td><span class="badge ${e.cls === 'Cash' ? 'cash' : e.cls === 'WTA' ? 'wta' : 'gpp'}">${e.cls || '-'}</span></td>
+    <td><input class="tag-cell" list="approach-list" value="${(e.tag||'').replace(/"/g,'&quot;')}" placeholder="—"
+         onchange="setEntryTag('${e.id}', this.value)"></td>
     <td>$${(e.fee||0).toFixed(2)}</td>
     <td>${e.pts != null ? e.pts.toFixed(1) : '-'}</td>
     <td>${e.rank || '-'}</td>
@@ -463,11 +502,27 @@ function renderHistory() {
 
   g('hist-table').innerHTML = `<table>
     <thead><tr>
-      <th>Date</th><th>Site</th><th>Contest</th><th>Class</th>
+      <th>Date</th><th>Site</th><th>Contest</th><th>Class</th><th>Approach</th>
       <th>Fee</th><th>Score</th><th>Rank</th><th>Cash</th><th>P/L</th><th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+function setEntryTag(id, val) {
+  const e = entries.find(x => String(x.id) === String(id));
+  if (!e) return;
+  e.tag = (val || '').trim();
+  persist();
+  renderDashboard();
+}
+
+// Tag every entry on a given date that has no tag yet — for backfilling a slate
+function tagUntaggedOnDate(date, tag) {
+  let n = 0;
+  entries.forEach(e => { if (e.date === date && !e.tag) { e.tag = tag; n++; } });
+  if (n) { persist(); renderAll(); }
+  return n;
 }
 
 function deleteEntry(id) {

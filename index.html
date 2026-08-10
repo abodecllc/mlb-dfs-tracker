@@ -77,6 +77,17 @@
         <div class="card">
           <div class="import-summary" id="import-summary"></div>
           <div id="preview-table"></div>
+          <div class="card" style="background:var(--gray-50);padding:.875rem;margin-bottom:.75rem">
+            <div class="divider" style="margin-top:0">Approach tag <span style="font-weight:400;color:var(--gray-500);text-transform:none;letter-spacing:0">— which build method produced these lineups?</span></div>
+            <input list="approach-list" id="import-tag" placeholder="e.g. Banded, Flat spread, SIM ROI top-N" style="width:100%">
+            <datalist id="approach-list">
+              <option value="Banded"></option>
+              <option value="Flat spread"></option>
+              <option value="SIM ROI top-N"></option>
+              <option value="Manual"></option>
+            </datalist>
+            <p style="font-size:12px;color:var(--gray-500);margin-top:.5rem;line-height:1.5">Applied to every lineup in this import. Leave blank to import as Untagged. You can change it later in History.</p>
+          </div>
           <div class="btn-row">
             <button class="btn primary" onclick="confirmImport()"><i class="ti ti-check"></i> Import all</button>
             <button class="btn" onclick="resetImport()">Start over</button>
@@ -103,6 +114,7 @@
           <select id="hist-site" onchange="renderHistory()"><option value="">All sites</option><option>DK</option><option>FD</option></select>
           <select id="hist-class" onchange="renderHistory()"><option value="">GPP &amp; Cash</option><option value="GPP">GPP</option><option value="Cash">Cash</option></select>
           <select id="hist-cashed" onchange="renderHistory()"><option value="">All results</option><option value="Y">Cashed</option><option value="N">No cash</option></select>
+          <select id="hist-tag" onchange="renderHistory()"><option value="">All approaches</option></select>
         </div>
         <button class="btn" onclick="exportCSV()"><i class="ti ti-download"></i> Export CSV</button>
       </div>
@@ -451,51 +463,132 @@
       <div class="gpp-section-header">Main Slate GPP</div>
 
       <div class="card">
-        <div class="divider">What the data says (SplashPlay shark analysis)</div>
+        <div class="divider">Contests you play — flat payout profile</div>
+        <p class="gpp-text">You currently enter <strong>Solo Shot</strong> and <strong>Four Seamer</strong> only. Both share the same payout shape: <strong>10% of the prize pool to first</strong> and roughly a <strong>26% cash rate</strong>. That is a flat tournament, not a top-heavy one, and every decision below is calibrated to it.</p>
+        <ul class="gpp-bullets" style="margin-top:.75rem">
+          <li><strong>Stokastic "percent to first" = 10%.</strong> Not 25%, not 40%. Chris's 25% figure is for flagship large-field 20-max contests, which you are not playing yet.</li>
+          <li><strong>Pool size = 2,000</strong> (your tier max). Set it as close to the real field as your plan allows.</li>
+          <li><strong>Floor matters more than you would think.</strong> Paying a quarter of the field rewards reliably-good lineups over occasionally-spectacular ones. Lean closer to your cash instincts than to lottery-ticket instincts.</li>
+          <li><strong>Deep contrarian is near-worthless here.</strong> Nailing an 8%-owned stack that nobody has only pays off if it carries you to first — and first is only 10% of the pool.</li>
+        </ul>
+        <p class="gpp-text" style="margin-top:.75rem">When you expand into flagship / top-heavy contests, this whole tab needs a second set of bands. Do not reuse these numbers there.</p>
+      </div>
+
+      <div class="card">
+        <div class="divider">The three metrics — what each one is for</div>
+        <div class="table-wrap">
+          <table class="bd-table" style="font-size:13px">
+            <thead><tr><th style="text-align:left">Metric</th><th style="text-align:left">What it measures</th><th style="text-align:left">Use it for</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Vegas implied total</strong></td><td>Raw run expectation. Public and free.</td><td><strong>Setting the bands.</strong> Best proxy for what the field sees, so it is the right axis for ownership-based allocation.</td></tr>
+              <tr><td><strong>Stokastic Stack Score</strong></td><td>Stack quality — already includes Vegas total, plus park, opposing SP, batting order, correlation.</td><td>Picking within a band when you do not have Chris's data. <em>Not</em> a leverage metric — the field reads the same number.</td></tr>
+              <tr><td><strong>SplashPlay SIM ROI</strong></td><td>Net winnings vs fees in sim, with chalk already diluted for duplicate lineups.</td><td><strong>Picking within a band.</strong> Already ownership-adjusted, so it supersedes Stack Score when available.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="gpp-text" style="margin-top:.75rem">These are not three independent rankers — Stack Score contains Vegas total, and SIM ROI contains both. Using them as if they were separate votes double-counts the same information. Bands by Vegas rank, selection by SIM ROI.</p>
+      </div>
+
+      <div class="card">
+        <div class="divider">Band workflow — do this every slate</div>
+        <ol class="gpp-bullets" style="padding-left:1.25rem">
+          <li><strong>List all teams by Vegas implied total, highest to lowest.</strong> This is your rank order, and it approximates what the field is looking at.</li>
+          <li><strong>Cut the bands</strong> per the table below, based on slate size.</li>
+          <li><strong>Inside each band, rank by Chris's SIM ROI</strong> and take the number of teams listed. If no SplashPlay data that slate, fall back to Stokastic Stack Score.</li>
+          <li><strong>Assign exposure</strong> to hit the target percentage for each band across your book.</li>
+          <li><strong>Assign arms by joint ROI</strong> — see the next card. On small slates this is your main differentiator.</li>
+        </ol>
+
+        <div class="table-wrap" style="margin-top:1rem">
+          <table class="bd-table" style="font-size:13px">
+            <thead><tr><th style="text-align:left">Band</th><th style="text-align:left">Standard slate (8+ games)</th><th style="text-align:left">Small slate (4 games / 8 teams)</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Chalk</strong><br><span style="color:var(--gray-500)">Vegas ranks 1-2</span></td><td>Pick <strong>2 teams</strong> → <strong>35-40%</strong> exposure</td><td>Pick <strong>2 teams</strong> → <strong>~40%</strong> exposure</td></tr>
+              <tr><td><strong>Middle</strong><br><span style="color:var(--gray-500)">Ranks 3-7 (or 3-5 small)</span></td><td>Pick <strong>3-4 teams</strong> → <strong>50-55%</strong> exposure</td><td>Pick <strong>3 teams</strong> → <strong>~50%</strong> exposure</td></tr>
+              <tr><td><strong>Deep</strong><br><span style="color:var(--gray-500)">Ranks 8+ (or 6-8 small)</span></td><td>Pick <strong>1-2 teams</strong> → <strong>5-10%</strong> exposure</td><td>Pick <strong>1 team</strong> → <strong>~10%</strong> exposure</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="gpp-text" style="margin-top:.75rem"><strong>On a 20-lineup book, standard slate:</strong> ~7-8 lineups chalk, ~10-11 middle, ~1-2 deep. On a 4-game slate cut the book to <strong>10-12 entries</strong> — edge compresses when the pool is thin, and caps barely bind with only 8 teams to rotate through.</p>
+
+        <p class="gpp-text" style="margin-top:.75rem"><strong>Why chalk is not zero:</strong> a quarter of winning stacks come from top-2 Vegas teams. Running 0% chalk was the single biggest structural problem in the worst GPP stretch. Chalk should be floored at roughly half the field's win rate, but never eliminated.</p>
+
+        <p class="gpp-text" style="margin-top:.75rem"><strong>Small-slate note:</strong> "ranks 8+" does not exist on a 4-gamer. There is nowhere to hide, so chalk goes up and differentiation has to come from bat combinations inside stacks and from pitcher-stack pairings — not from team selection, since everyone can see all 8 implied totals.</p>
+      </div>
+
+      <div class="card">
+        <div class="divider">Reading Chris's top-stacks table</div>
         <ul class="gpp-bullets">
-          <li><strong>5-man stacks the majority of the time</strong> — not 4-man as a default. The extra hitter matters for ceiling.</li>
-          <li><strong>Top Vegas total team only 16% of winning stacks</strong> — the field over-concentrates on the highest implied total team. Mid-tier implied total teams that both sources agree on are where real leverage lives. Don't default to the obvious chalk stack.</li>
-          <li><strong>Bring-backs only 21% of winning lineups</strong> — not a structural requirement. The 6th roster spot should go to whoever projects best from anywhere on the slate. Use a bring-back only when a specific player genuinely fits, not as a rule.</li>
-          <li><strong>Average salary $48.5k, max spend only 51% of the time</strong> — leaving $1,500-2,000 on the table to get better-fitting players is correct more often than forcing max salary.</li>
-          <li><strong>Small slates (4 games or fewer)</strong> — 4-man or even 3-man stacks are fine. Pool is thin, differentiation is limited, forcing a 5-man stack creates unnecessary constraints.</li>
+          <li><strong>$ % is your column, not W %.</strong> Solo Shot and Four Seamer pay 26% of the field. A stack with strong cash rate and mediocre win rate is a <em>good</em> stack for these contests. Chasing the W column pulls you back toward boom-or-bust, which is the same error as the old 40%-to-first setting arriving through a different door.</li>
+          <li><strong>Joint ROI is the small-slate lever.</strong> "⚡ +63.8% JOINT ROI / SP Eovaldi, Tolle" means the stack paired with those arms tested far better than the stack alone. On an 8-team slate where team choice barely differentiates, this is where the real combinatorics live. Use it to assign arms across the book.</li>
+          <li><strong>Treat the numbers as tiers, not a strict order.</strong> 260 lineups is a small sample and thin ones are flagged ⚠. +11.3% and +8% are not meaningfully different — sort into clearly-positive / neutral / clearly-negative and break ties on Vegas rank so you stay inside your bands.</li>
+          <li><strong>Match stack size to the table you are reading.</strong> 3-man ROI figures are not comparable to 5-man — smaller stacks post better ROI partly because they are cheaper to be wrong about. Use the 3-man table for secondary/mini stacks, the 5-man table for your primary.</li>
+          <li><strong>LEV and 🎯 are context, not rankers.</strong> LEV is sim win contribution vs field ownership; 🎯 is market-implied explosion probability. Useful for understanding <em>why</em> a stack grades well. SIM ROI already accounts for both.</li>
         </ul>
       </div>
 
       <div class="card">
-        <div class="divider">Your 3 lineups</div>
+        <div class="divider">What the data says (SplashPlay shark analysis)</div>
+        <ul class="gpp-bullets">
+          <li><strong>Arms: accept consensus.</strong> Winners roster chalk pitchers and differentiate with bats. Never fade the top arm for ownership reasons. Choosing among co-equal top arms by leverage is fine — that is not a fade.</li>
+          <li><strong>Winning stack Vegas rank: p25 = 2, p50 = 5, p75 = 7.</strong> The meat of the distribution is ranks 3-7, but a quarter of winners come from the top 2. Do not zero out chalk.</li>
+          <li><strong>Implied totals 4.3-4.8 are the eruption band</strong> — the range winning stacks come from most often.</li>
+          <li><strong>5-man stacks are the majority.</strong> The extra hitter matters for ceiling.</li>
+          <li><strong>Sub-10%-owned bats inside mid-board stacks</strong> are the cleanest source of leverage plus ceiling at once.</li>
+          <li><strong>Bring-backs appear in only 21-29% of winners</strong> — not structural. The 6th spot goes to best available anywhere on the slate.</li>
+          <li><strong>Spend near max.</strong> ~$49.8k on clean chalk slates, ~$48.5k on messy ones. Raw points win contests.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="divider">Stokastic settings for these contests</div>
+        <ul class="gpp-bullets">
+          <li><strong>Pool size = 2,000</strong> (tier max). This <em>is</em> the simulated field size — there is no separate field setting on your interface.</li>
+          <li><strong>Percent to first = 10%.</strong> Verified from the actual payout tables for both Solo Shot and Four Seamer.</li>
+          <li><strong>Exposure caps live in the Pre-Contest Simulator</strong>, not the Contest Generator. After the sim: set caps → <strong>Adjust Favorites</strong> → Export Favorites. Adjust Favorites is the apply step after <em>any</em> tweak.</li>
+          <li><strong>Team stack caps bind primary stacks only, not secondary.</strong> Real chalk exposure runs higher than the cap suggests. Setting chalk primary to your target still works cleanly, since secondary does not consume it.</li>
+          <li><strong>Point the team cap at the chalk team to suppress it</strong> rather than capping your leverage plays. Let top-2 leverage teams run 30-35%.</li>
+          <li><strong>Projection edits happen before the sim</strong> and flow through correlated players. <strong>ROI boosts happen after</strong> and only re-rank lineups. Boost-then-cap forces an exact exposure.</li>
+          <li><strong>Leave projected ownership alone.</strong> That field models the <em>field's</em> ownership, not your preference. It is the easiest place to fool yourself, and Stokastic's estimates are accurate.</li>
+          <li><strong>Verify shape, not just caps.</strong> Caps control exposure, not construction. Count true 5-man stacks in the export before you upload.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="divider">Your lineup structure</div>
         <div class="gpp-3lu">
           <div class="gpp-lu-card">
             <div class="gpp-lu-num">1</div>
-            <div class="gpp-lu-title">Primary stack</div>
+            <div class="gpp-lu-title">Chalk band</div>
             <ul>
-              <li>5-man stack from a <strong>mid-tier implied total team</strong> both sources agree on — not the chalk top-total team</li>
-              <li>Consecutive batting order (1-5) where possible</li>
-              <li>SP from a completely different game facing a weak offense</li>
-              <li>6th spot: best available player anywhere — no forced bring-back</li>
+              <li>~40% of the book on Vegas ranks 1-2</li>
+              <li>Best SIM ROI team in the band</li>
+              <li>5-man stack, consecutive batting order where possible</li>
+              <li>Differentiate <em>within</em> the stack — sub-10% bats, not a different team</li>
             </ul>
           </div>
           <div class="gpp-lu-card">
             <div class="gpp-lu-num">2</div>
-            <div class="gpp-lu-title">Secondary stack</div>
+            <div class="gpp-lu-title">Middle band</div>
             <ul>
-              <li>5-man stack from a completely different game than lineup 1</li>
-              <li>Different SP entirely</li>
-              <li>6th spot: best available — bring-back only if it genuinely fits</li>
-              <li>Hedges against lineup 1's game environment going cold</li>
+              <li>~50% of the book on ranks 3-7 (3-5 on small slates)</li>
+              <li>Top 3-4 teams by SIM ROI, spread across them</li>
+              <li>Implied totals in the 4.3-4.8 eruption band</li>
+              <li>Vary pitcher-stack pairings by joint ROI</li>
             </ul>
           </div>
           <div class="gpp-lu-card">
             <div class="gpp-lu-num">3</div>
-            <div class="gpp-lu-title">Contrarian</div>
+            <div class="gpp-lu-title">Deep band</div>
             <ul>
-              <li>5-man stack on an overlooked team — low projected ownership, both sources like them</li>
-              <li>Low-owned SP — biggest single differentiator available</li>
-              <li>Different game from lineups 1 and 2</li>
-              <li>No bring-back — accept lower median for unique ceiling</li>
+              <li>~10% of the book — 1-2 lineups only</li>
+              <li>Keep it small: flat payouts barely reward the spike</li>
+              <li>Skip entirely if no deep team grades positive on SIM ROI</li>
             </ul>
           </div>
         </div>
-        <p class="gpp-text" style="margin-top:1rem"><strong>Non-negotiable:</strong> Different SP in every lineup. Different game environment in every lineup. Never the same stack across two lineups.</p>
+        <p class="gpp-text" style="margin-top:1rem"><strong>Non-negotiable:</strong> never roster an SP facing your own stack. The builder's anticorrelation guard enforces this automatically — if it warns that the SP pool is too thin, that is a real signal about the slate, not a nuisance.</p>
       </div>
 
       <div class="card">
@@ -504,17 +597,19 @@
           <div class="gpp-col">
             <h4><i class="ti ti-circle-minus"></i> Small (1-4 games)</h4>
             <ul>
-              <li>4-man or 3-man stacks are fine — pool is thin and forcing 5 creates unnecessary constraints.</li>
-              <li>Ownership concentrates heavily. Best lever is a contrarian SP the field underweights.</li>
-              <li>Reduce budget. Down to 1 reliable game → skip GPP, cash only or sit out.</li>
+              <li>Still default to 5-man stacks — raw points win contests, and the ceiling matters more than the constraint costs.</li>
+              <li>Chalk band goes <strong>up</strong> to ~40%. There is nowhere to hide with 8 teams and the field sees the same totals.</li>
+              <li>Differentiate via bat combinations inside stacks and pitcher-stack pairings (joint ROI), not team selection.</li>
+              <li>Cut the book to 10-12 entries. Edge compresses when the pool is thin.</li>
+              <li>Down to 1 reliable game → skip GPP, cash only or sit out.</li>
             </ul>
           </div>
           <div class="gpp-col">
             <h4><i class="ti ti-circle-plus"></i> Large (10+ games)</h4>
             <ul>
-              <li>Default to 5-man stacks. More options, easier to find non-chalk mid-tier teams.</li>
-              <li>Ownership spreads thin — true leverage spots exist across multiple games.</li>
-              <li>Run all 3 lineups fully differentiated.</li>
+              <li>Full band split available: chalk 35-40%, middle 50-55%, deep 5-10%.</li>
+              <li>Ownership spreads thin — a real deep band exists, unlike on small slates.</li>
+              <li>Run the full book. Exposure caps actually bind at this many teams.</li>
             </ul>
           </div>
         </div>
@@ -526,10 +621,10 @@
           <table class="bd-table" style="font-size:13px">
             <thead><tr><th style="text-align:left">Field</th><th style="text-align:left">Approach</th></tr></thead>
             <tbody>
-              <tr><td><strong>~10</strong></td><td>Light differentiation needed. 1 leverage piece (SP or stack) on an otherwise strong build. Don't over-engineer.</td></tr>
-              <tr><td><strong>~100</strong></td><td>1 clear differentiator usually enough. Full 3-lineup framework starts to make sense.</td></tr>
-              <tr><td><strong>~1,000</strong></td><td>Run full 3-lineup framework. Ownership signals matter. Mid-tier stack targeting is key.</td></tr>
-              <tr><td><strong>2,000+</strong></td><td>Contrarian SP + overlooked mid-tier stack. Chalk gets you min-cash at best. Accept lower median for unique ceiling.</td></tr>
+              <tr><td><strong>~10</strong></td><td>Light differentiation. One leverage piece on an otherwise strong build. Don't over-engineer.</td></tr>
+              <tr><td><strong>~100</strong></td><td>One clear differentiator usually enough. Band structure starts to matter.</td></tr>
+              <tr><td><strong>~1,000</strong></td><td>Run the full band allocation. Ownership signals matter.</td></tr>
+              <tr><td><strong>3,000-5,500</strong><br><span style="color:var(--gray-500)">Solo Shot / Four Seamer</span></td><td>Full bands at flat-payout weights (chalk 35-40%). Pool size 2,000, percent to first 10%. Do <em>not</em> shift contrarian just because the field is big — the payout shape, not the field size, sets the aggression.</td></tr>
             </tbody>
           </table>
         </div>
