@@ -2084,7 +2084,39 @@ function buildWtaLineups() {
   }
 
   const eligibleFor = (p, slot) => p.pos.split('/').map(s => s.trim()).includes(slot);
-  const score = p => wtaScoreMethod === 'value' ? p.value : p.ceiling;
+  const isPitcher = p => p.pos.split('/').map(s => s.trim()).includes('SP');
+
+  // Proportional projection-disagreement test.
+  // An absolute point threshold is wrong across position groups: 5 pts on a
+  // 22-pt ace is a small disagreement, 5 pts on an 8-pt hitter is enormous.
+  // Scale the allowance to the size of the projection instead.
+  // Pitchers get a wider allowance than hitters — SP projections carry genuinely
+  // larger spreads between sources (innings, K rate, and hook timing all vary),
+  // so the same percentage would still cut the top arms.
+  const DIFF_PCT_SP  = 0.40;
+  const DIFF_PCT_BAT = 0.25;
+  const diffOK = p => {
+    const base = Math.max(p.sp, p.st);
+    if (base <= 0) return false;
+    const pct = isPitcher(p) ? DIFF_PCT_SP : DIFF_PCT_BAT;
+    return p.diff <= Math.max(wtaMaxDiff, base * pct);
+  };
+
+  // Ownership cap never applies to pitchers. Fading a top arm for ownership is
+  // the single most damaging thing this builder can do — winners roster chalk
+  // pitchers and differentiate with bats.
+  const ownOK = p => isPitcher(p) || p.own === 0 || p.own <= wtaMaxOwn;
+
+  const passesFilters = p => diffOK(p) && ownOK(p);
+
+  // Ceiling scoring understates aces: elite pitchers have LOW std dev, which is
+  // what makes them elite. Give pitchers a reduced volatility weight so a
+  // volatile mid-tier arm doesn't outrank a dominant one on ceiling alone.
+  const score = p => {
+    if (wtaScoreMethod === 'value') return p.value;
+    if (isPitcher(p)) return p.sp + (wtaUpside * 0.4) * p.stdDev;
+    return p.ceiling;
+  };
 
   // Parse lock fields — locked players go into Lineup 1
   const findInPool = (nameInput, posFilter) => {
@@ -2115,6 +2147,26 @@ function buildWtaLineups() {
   const warnings = [];
   wtaLineups = [];
 
+  // - Filter audit: fail loudly when the filters drop a top-of-board player -
+  // Silent exclusion is how the builder ended up fading the slate's best arm
+  // without ever saying so. Surface it instead.
+  (function auditFilters() {
+    const dropped = luPool.filter(p => !passesFilters(p));
+    if (!dropped.length) return;
+
+    // Top 2 pitchers and top 5 hitters by score, before any filtering
+    const pitchers = luPool.filter(isPitcher).sort((a,b) => score(b) - score(a)).slice(0, 2);
+    const hitters  = luPool.filter(p => !isPitcher(p)).sort((a,b) => score(b) - score(a)).slice(0, 5);
+    const notable  = [...pitchers, ...hitters].filter(p => !passesFilters(p));
+
+    notable.forEach(p => {
+      const why = [];
+      if (!diffOK(p)) why.push(`projections disagree by ${p.diff.toFixed(1)} pts (SplashPlay ${p.sp.toFixed(1)} / Stokastic ${p.st.toFixed(1)})`);
+      if (!ownOK(p))  why.push(`${p.own.toFixed(0)}% owned, above the ${wtaMaxOwn}% cap`);
+      warnings.push(`Filtered out ${p.name} (${p.team}), a top-board ${isPitcher(p) ? 'pitcher' : 'hitter'} — ${why.join(' and ')}. Lock the player or loosen the filter if you want them.`);
+    });
+  })();
+
   for (let li = 0; li < configs.length; li++) {
     const cfg = configs[li];
     const result = buildOneWta(cfg, li + 1, li === 0 ? lockedPlayers : []);
@@ -2132,7 +2184,7 @@ function buildWtaLineups() {
     const lockNames = new Set(locks.map(p => p.name));
     const pool = luPool.filter(p =>
       !globalUsed.has(p.name) &&
-      (lockNames.has(p.name) || (p.diff <= wtaMaxDiff && (p.own === 0 || p.own <= wtaMaxOwn)))
+      (lockNames.has(p.name) || passesFilters(p))
     );
 
     // - Assign locks to slots first -
