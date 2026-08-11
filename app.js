@@ -888,13 +888,35 @@ function buildLineup() {
   // Apply exclusions: user-specified teams and players
   const excludeTeams = new Set(excludeRaw);
 
+  // Cash: batting order floor.
+  // Plate appearances are the primary driver of hitter floor, and the optimizer
+  // is mean-maximizing — it cannot see that a $2k 9-hole bat and a $4k 3-hole bat
+  // with the same projection have very different downside. Filter on the actual
+  // mechanism (order position) rather than using salary as a proxy, so a genuinely
+  // cheap player hitting leadoff stays eligible.
+  const maxBatPos = isWTA ? 9 : (parseInt(gv('lu-max-batpos')) || 6);
+  const isSP = p => p.pos.split('/').map(x => x.trim()).includes('SP');
+  let batPosUnknown = 0, batPosCut = 0;
+
   // Filter pool: no excluded teams, no excluded players
   const eligiblePool = luPool.filter(p => {
     if (excludeTeams.has(p.team.toUpperCase())) return false;
     if (excludePlayersRaw.some(ex => p.name.toLowerCase().includes(ex))) return false;
     if (isWTA && p.own > 0 && p.own > wtaMaxOwn) return false; // WTA: exclude high-owned chalk
+    if (!isWTA && !isSP(p) && maxBatPos < 9) {
+      // Unknown order (0) is kept — DK locks salaries before lineups post, so an
+      // unconfirmed cheap bat may well hit leadoff. Counted and surfaced instead.
+      if (!p.batPos) { batPosUnknown++; }
+      else if (p.batPos > maxBatPos) { batPosCut++; return false; }
+    }
     return true;
   });
+
+  if (!isWTA && maxBatPos < 9 && batPosUnknown) {
+    showAlert('lineup-alert',
+      `Batting order filter: ${batPosCut} hitters cut for batting below ${maxBatPos}. ${batPosUnknown} hitters have no confirmed order yet and were kept — re-run once lineups post if any land in your build.`,
+      'info', 10000);
+  }
 
   // In WTA mode use relaxed diff threshold; sort by ceiling not consensus
   const activeMaxDiff = isWTA ? wtaMaxDiff : MAX_DIFF;

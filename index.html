@@ -172,6 +172,11 @@
             <input type="number" id="lu-cap" value="50000" step="100">
           </div>
           <div class="field">
+            <label>Max batting order position (cash)</label>
+            <input type="number" id="lu-max-batpos" value="6" step="1" min="1" max="9">
+            <div class="field-hint">Hitters batting below this are excluded. Plate appearances drive floor — 6 recommended. Set 9 to disable.</div>
+          </div>
+          <div class="field">
             <label>Exclude teams (comma separated)</label>
             <input type="text" id="lu-exclude-teams" placeholder="e.g. CHC, NYY">
           </div>
