@@ -257,6 +257,11 @@
               </select>
               <div class="field-hint">No player appears in more than one lineup — full differentiation including pitchers.</div>
             </div>
+            <div class="field">
+              <label>Force players at exposure % <span style="font-weight:400;color:var(--gray-500)">(one per line)</span></label>
+              <textarea id="lu-wta-force" rows="3" placeholder="Blake Snell 50&#10;Shohei Ohtani 50&#10;Max Muncy 50"></textarea>
+              <div class="field-hint">Name then percent. These bypass the ownership and disagreement filters and are the only players allowed to repeat across lineups. Percent rounds to whole lineups &mdash; 50% of 4 lineups is 2. Omit the number to default to 50%.</div>
+            </div>
           </div>
           <div id="lu-wta-lineup-configs"></div>
           <div class="divider" style="margin-top:.75rem">WTA scoring method</div>

@@ -2165,8 +2165,37 @@ function buildWtaLineups() {
     }
   }
 
-  const globalUsed = new Set(); // no player in more than one lineup
   const warnings = [];
+
+  // - Forced players with exposure targets -
+  // These are the only players permitted to repeat across lineups. Everyone else
+  // stays under the hard no-duplicate rule.
+  const forced = [];
+  // Split on newlines only — a comma is allowed *within* a line as the
+  // name/percent separator ("Tarik Skubal, 25").
+  const forcedRaw = (gv('lu-wta-force') || '')
+    .split(/\r?\n/).map(x => x.trim().replace(/,\s*$/, '')).filter(Boolean);
+  forcedRaw.forEach((line, j) => {
+    // "Blake Snell 50" / "Blake Snell 50%" / "Blake Snell"
+    const m = line.match(/^(.*?)[\s,]+(\d{1,3})\s*%?$/);
+    const nameIn = (m ? m[1] : line).trim();
+    const pct    = m ? parseInt(m[2]) : 50;
+    const found  = findInPool(nameIn, null);
+    if (!found) {
+      warnings.push(`Force "${nameIn}" not found in the player pool — check spelling, or the salary/projection files may not cover that player.`);
+      return;
+    }
+    if (forced.some(f => f.p.name === found.name)) return;
+    const targetCount = Math.min(numLineups, Math.max(1, Math.round((pct / 100) * numLineups)));
+    // Stagger start positions so multiple forced players don't all pile into
+    // lineup 1 and leave the rest of the book without any of them.
+    const lineups = new Set();
+    for (let k = 0; k < targetCount; k++) lineups.add(((j + k) % numLineups) + 1);
+    forced.push({ p: found, pct, targetCount, lineups });
+  });
+  const forcedNames = new Set(forced.map(f => f.p.name));
+
+  const globalUsed = new Set(); // no player in more than one lineup
   wtaLineups = [];
 
   // - Filter audit: fail loudly when the filters drop a top-of-board player -
@@ -2191,12 +2220,24 @@ function buildWtaLineups() {
 
   for (let li = 0; li < configs.length; li++) {
     const cfg = configs[li];
-    const result = buildOneWta(cfg, li + 1, li === 0 ? lockedPlayers : []);
+    const forcedHere = forced
+      .filter(f => f.lineups.has(li + 1))
+      .map(f => Object.assign({}, f.p, {
+        _lockPos: isPitcher(f.p) ? 'SP' : null,
+        _forced: true,
+      }));
+    // A player named in both the lock fields and the force list is only added once
+    const seedLocks = (li === 0 ? lockedPlayers : [])
+      .filter(l => !forcedHere.some(f => f.name === l.name))
+      .concat(forcedHere);
+
+    const result = buildOneWta(cfg, li + 1, seedLocks);
     if (!result) {
       warnings.push(`Lineup ${li + 1}: could not build a valid lineup with remaining player pool. Try fewer lineups or looser filters.`);
       continue;
     }
-    result.players.forEach(p => globalUsed.add(p.name));
+    // Forced players stay available — they are the only permitted repeats
+    result.players.forEach(p => { if (!forcedNames.has(p.name)) globalUsed.add(p.name); });
     wtaLineups.push(result);
   }
 
@@ -2204,10 +2245,14 @@ function buildWtaLineups() {
     // Pool for this lineup: eligible + not used in prior lineups.
     // Locked players bypass the ownership/diff filters.
     const lockNames = new Set(locks.map(p => p.name));
-    const pool = luPool.filter(p =>
-      !globalUsed.has(p.name) &&
-      (lockNames.has(p.name) || passesFilters(p))
-    );
+    const forcedHereNames = new Set(locks.filter(p => p._forced).map(p => p.name));
+    const pool = luPool.filter(p => {
+      // Forced players appear only in the lineups assigned to them, and bypass
+      // the ownership and disagreement filters — the point is to override.
+      if (forcedNames.has(p.name)) return forcedHereNames.has(p.name);
+      if (globalUsed.has(p.name)) return false;
+      return lockNames.has(p.name) || passesFilters(p);
+    });
 
     // - Assign locks to slots first -
     const preAssigned = [];
@@ -2231,8 +2276,13 @@ function buildWtaLineups() {
       let stackTeam = cfg.team;
       const hitters = pool.filter(p => !eligibleFor(p, 'SP'));
       if (!stackTeam) {
+        // Never auto-pick a stack facing a pitcher we have already committed to
+        const spOpps = new Set(preAssigned.filter(p => p._slot === 'SP' && p.opp).map(p => p.opp.toUpperCase()));
         const tc = {};
-        hitters.forEach(p => { tc[p.team] = (tc[p.team] || 0) + p.ceiling; });
+        hitters.forEach(p => {
+          if (spOpps.has(p.team)) return;
+          tc[p.team] = (tc[p.team] || 0) + p.ceiling;
+        });
         stackTeam = Object.entries(tc).sort((a,b) => b[1]-a[1])[0]?.[0] || '';
       }
       if (stackTeam) {
@@ -2424,6 +2474,29 @@ function renderWtaLineupsResult(warnings, CAP, scoreMethod, minSal) {
   }).join('');
 
   g('lu-lineup-table').innerHTML = `<div class="wta-lu-grid">${cols}</div>`;
+
+  // - Exposure readout: every player appearing in more than one lineup -
+  const expCount = {};
+  wtaLineups.forEach(lu => lu.players.forEach(p => {
+    expCount[p.name] = (expCount[p.name] || 0) + 1;
+  }));
+  const repeats = Object.entries(expCount)
+    .filter(([, n]) => n > 1)
+    .sort((a, b) => b[1] - a[1]);
+  if (repeats.length) {
+    const n = wtaLineups.length;
+    const rows = repeats.map(([name, c]) =>
+      `<tr><td>${name}</td><td style="text-align:right">${c} of ${n}</td><td style="text-align:right">${(c / n * 100).toFixed(0)}%</td></tr>`
+    ).join('');
+    g('lu-lineup-table').innerHTML += `
+      <div class="card" style="margin-top:1rem">
+        <div class="divider" style="margin-top:0">Exposure — players in more than one lineup</div>
+        <table class="bd-table" style="font-size:13px">
+          <thead><tr><th style="text-align:left">Player</th><th style="text-align:right">Lineups</th><th style="text-align:right">Exposure</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
 
   const warnHTML = warnings.length
     ? warnings.map(w => `<div class="alert info" style="margin-bottom:6px"><i class="ti ti-alert-circle"></i>${w}</div>`).join('')
