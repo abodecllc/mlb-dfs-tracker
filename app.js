@@ -654,6 +654,9 @@ function parseLuSalaries(rows) {
     // Normalize: SP/RP both become SP for optimizer; keep multi-position as-is
     let pos = (rawPos === 'RP') ? 'SP' : rawPos;
     pos = pos.replace(/^CPT\/?/, '').replace(/^MVP\/?/, '') || pos;
+    // DK's "Starting" column carries the confirmed batting order slot when lineups
+    // have posted — a first-party source, more reliable than a projection file.
+    const dkBatPos = parseInt(r['starting'] || r['Starting'] || 0) || 0;
     if (name && sal) {
       // Showdown exports list each player twice: once as CPT (salary already x1.5)
       // and once as UTIL/FLEX (true base salary). Always keep the FLEX/UTIL base
@@ -661,11 +664,68 @@ function parseLuSalaries(rows) {
       const isCptRow = rawRosterPos === 'CPT' || rawRosterPos === 'MVP';
       const existingIsCpt = out[name] && out[name]._isCpt;
       if (!out[name] || (existingIsCpt && !isCptRow)) {
-        out[name] = { sal, pos, team, id, opp, _isCpt: isCptRow };
+        out[name] = { sal, pos, team, id, opp, dkBatPos, _isCpt: isCptRow };
       }
     }
   });
   return out;
+}
+
+// - Cross-source name matching -
+// DK, SplashPlay and Stokastic do not spell names identically. Sources disagree on
+// short forms (Nate / Nathaniel), accents, punctuation and generational suffixes,
+// and an exact string join silently drops those players from the pool.
+function normName(str) {
+  return (str || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // strip accents
+    .toLowerCase()
+    .replace(/[.'`\u2019]/g, '')                        // periods, apostrophes
+    .replace(/[-_]/g, ' ')
+    .replace(/\b(jr|sr|ii|iii|iv)\b/g, '')             // generational suffixes
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Alias keys for one entry: normalized full name, and first-initial + last name
+// (which is what bridges Nate/Nathaniel). Team-qualified variants come first so
+// same-name players on different teams stay distinct.
+function aliasKeys(name, team) {
+  const n = normName(name);
+  if (!n) return [];
+  const parts = n.split(' ').filter(Boolean);
+  const first = parts[0] || '';
+  const last  = parts.length > 1 ? parts.slice(1).join(' ') : first;
+  const init  = `${first.charAt(0)}|${last}`;
+  const t     = (team || '').toLowerCase();
+  const keys  = [n, init];
+  if (t) keys.unshift(`${n}|${t}`, `${init}|${t}`);
+  return keys;
+}
+
+// Register aliases without clobbering real entries, and blank out any bare
+// (non-team-qualified) alias that two different players both claim.
+function registerAliases(out, name, team, value) {
+  const collisions = out.__collide || (out.__collide = {});
+  aliasKeys(name, team).forEach(k => {
+    if (k in out && out[k] !== value) {
+      // Two distinct players want this key — unsafe, so retire it
+      if (!k.includes('|' + (team || '').toLowerCase())) { collisions[k] = true; }
+      return;
+    }
+    if (!(k in out)) out[k] = value;
+  });
+}
+
+// Try progressively looser keys. Returns undefined rather than a wrong player.
+function resolveName(map, name, team) {
+  if (!map) return undefined;
+  if (name in map) return map[name];
+  const collide = map.__collide || {};
+  for (const k of aliasKeys(name, team)) {
+    if (collide[k]) continue;
+    if (k in map) return map[k];
+  }
+  return undefined;
 }
 
 function parseLuSplash(rows) {
@@ -674,7 +734,8 @@ function parseLuSplash(rows) {
     // "Player Name and Id", "Player Name", "Projection"
     const name = (r['player name'] || r['Player Name'] || r['name'] || '').trim();
     const proj = parseFloat(r['projection'] || r['Projection'] || r['fpts'] || 0) || 0;
-    if (name) out[name] = proj;
+    const team = (r['team'] || r['Team'] || '').trim();
+    if (name) { out[name] = proj; registerAliases(out, name, team, proj); }
   });
   return out;
 }
@@ -698,10 +759,10 @@ function parseLuStok(rows) {
     const confirmed = ((r['confirmed'] || r['Confirmed'] || '') + '').trim().toUpperCase();
     if (name) {
       const key = team ? `${name}|${team}` : name;
-      out[key] = { proj, team, pos, stdDev, own, batPos, confirmed };
-      if (!out[name] || (out[name].proj === 0 && proj > 0)) {
-        out[name] = { proj, team, pos, stdDev, own, batPos, confirmed };
-      }
+      const rec = { proj, team, pos, stdDev, own, batPos, confirmed };
+      out[key] = rec;
+      if (!out[name] || (out[name].proj === 0 && proj > 0)) out[name] = rec;
+      registerAliases(out, name, team, rec);
     }
   });
   return out;
@@ -763,16 +824,21 @@ function buildLineup() {
   luPool = [];
   const allNames = new Set([...Object.keys(salMap), ...Object.keys(splashMap)]);
 
+  const unmatched = [];
   allNames.forEach(name => {
     const salData  = salMap[name];
     if (!salData) return;
-    const sp = splashMap[name] || 0;
-    const teamKey = salData.team ? `${name}|${salData.team}` : name;
-    const stEntry = stokMap[teamKey] || stokMap[name];
+    const sp = resolveName(splashMap, name, salData.team) || 0;
+    const stEntry = resolveName(stokMap, name, salData.team);
     const st      = stEntry ? stEntry.proj   : 0;
     const stdDev  = stEntry ? stEntry.stdDev : 0;
     const own     = stEntry ? stEntry.own    : 0;
-    const batPos  = stEntry ? stEntry.batPos : 0;
+    // DK's confirmed batting order wins when present; Stokastic fills the gap
+    const batPos  = salData.dkBatPos || (stEntry ? stEntry.batPos : 0);
+    if ((sp === 0 || st === 0) && salData.sal >= 3000) {
+      unmatched.push({ name, team: salData.team, sal: salData.sal,
+                       missing: sp === 0 && st === 0 ? 'both files' : (sp === 0 ? 'SplashPlay' : 'Stokastic') });
+    }
     const team    = salData.team || (stEntry ? stEntry.team : '');
     const pos     = salData.pos  || (stEntry ? stEntry.pos  : '');
     if (sp === 0 || st === 0) return;
@@ -786,6 +852,17 @@ function buildLineup() {
     const value     = salData.sal > 0 ? sp / (salData.sal / 1000) : 0;
     luPool.push({ name, team, pos, sal: salData.sal, sp, st, diff, consensus, ceiling, value, stdDev, own, batPos });
   });
+
+  // Surface salaried players that failed to join, so a missing projection is
+  // visible rather than a silent omission from the pool.
+  if (unmatched.length) {
+    const top = unmatched.sort((a, b) => b.sal - a.sal).slice(0, 12);
+    const list = top.map(u => `${u.name} (${u.team}, $${u.sal}) — no ${u.missing}`).join('<br>');
+    const more = unmatched.length > top.length ? `<br><em>…and ${unmatched.length - top.length} more</em>` : '';
+    showAlert('lineup-alert',
+      `${unmatched.length} salaried players ($3k+) are missing projections and were left out of the pool:<br>${list}${more}`,
+      'info', 14000);
+  }
 
   // A player can fill any slot listed in their position string (e.g. "OF/1B" -> OF or 1B)
   function eligibleFor(p, slot) {
